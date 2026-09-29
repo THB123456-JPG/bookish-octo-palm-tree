@@ -1,0 +1,3089 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TG 机器人管理面板</title>
+
+<!-- ===== 添加到桌面（手机把面板加成图标，点开是全屏的）=====
+     ★ 图标和 manifest 在 static/ 下，由 panel.py 的 STATIC_FILES 发出来，
+       **那几条路由是免鉴权的** —— 浏览器来取的时候不会带密码头，
+       挂了鉴权手机上就是个白图标。 -->
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#0f1420">
+<!-- ★ iOS 只认下面这几个 apple- 开头的。不加的话点桌面图标
+     还是跳进 Safari（地址栏、工具栏都还在），加了才是全屏像 App -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="TG面板">
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,"Microsoft YaHei",sans-serif;background:#0f1420;color:#e6edf3;padding:24px}
+.wrap{max-width:1180px;margin:0 auto}
+h1{font-size:20px;margin-bottom:4px}
+.sub{color:#7d8590;font-size:13px;margin-bottom:20px}
+.card{background:#161b26;border:1px solid #26303f;border-radius:10px;padding:18px;margin-bottom:18px}
+.card h2{font-size:15px;margin-bottom:12px;color:#c9d1d9;font-weight:600}
+.card h2 .cnt{color:#7d8590;font-weight:400;font-size:13px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+input,select{background:#0d1117;border:1px solid #30363d;color:#e6edf3;padding:9px 12px;border-radius:7px;font-size:14px;outline:none;font-family:inherit}
+input:focus,select:focus{border-color:#2f81f7}
+#note{width:150px}#token{flex:1;min-width:220px}
+#type{width:130px}#duration{width:110px}
+button{background:#238636;border:none;color:#fff;padding:9px 18px;border-radius:7px;font-size:14px;cursor:pointer;font-family:inherit}
+button:hover{background:#2ea043}
+button.gray{background:#21262d;border:1px solid #30363d;color:#c9d1d9}
+button.gray:hover{background:#30363d}
+button.red{background:#8b2c2c}
+button.red:hover{background:#a33}
+button.sm{padding:5px 11px;font-size:12.5px}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th{text-align:left;color:#7d8590;font-weight:500;padding:9px 10px;border-bottom:1px solid #26303f;white-space:nowrap}
+td{padding:11px 10px;border-bottom:1px solid #1d2531;vertical-align:middle}
+tr:last-child td{border-bottom:none}
+.code{font-family:Consolas,monospace;background:#0d1117;border:1px dashed #3d4757;padding:3px 9px;border-radius:6px;font-size:13px;color:#e3b341;letter-spacing:1px;cursor:pointer}
+.code:hover{border-color:#e3b341}
+.tag{display:inline-block;padding:2px 9px;border-radius:20px;font-size:12px}
+.ok{background:#12261e;color:#3fb950;border:1px solid #1f6f3f}
+.wait{background:#2b2413;color:#d29922;border:1px solid #6b5518}
+.err{background:#2d1618;color:#f85149;border:1px solid #7a2b2b}
+.off{background:#21262d;color:#7d8590;border:1px solid #30363d}
+.muted{color:#7d8590;font-size:12px;margin-top:3px}
+.empty{text-align:center;color:#7d8590;padding:28px 0}
+.hint{background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:12px 14px;font-size:13px;line-height:1.8;color:#9aa5b1;margin-bottom:14px}
+.hint code{background:#1c2430;padding:1px 6px;border-radius:4px;color:#e3b341;font-family:Consolas,monospace}
+#mask{position:fixed;inset:0;background:#0f1420;display:flex;align-items:center;justify-content:center;z-index:99}
+#mask .box{background:#161b26;border:1px solid #26303f;border-radius:12px;padding:28px;width:340px;text-align:center}
+#mask input{width:100%;margin:14px 0;text-align:center;letter-spacing:2px}
+#mask button{width:100%}
+#toast{position:fixed;bottom:26px;left:50%;transform:translateX(-50%);background:#21262d;border:1px solid #30363d;padding:11px 22px;border-radius:8px;font-size:14px;display:none;z-index:100;max-width:80vw;text-align:center}
+#extModal,#shopCfgModal,#ledgerCfgModal,#orderModal,#chpassModal,#tokenModal,#assignModal,#totpModal{position:fixed;inset:0;background:rgba(8,11,17,.82);display:flex;align-items:center;justify-content:center;z-index:101}
+#extModal .box,#shopCfgModal .box,#ledgerCfgModal .box,#orderModal .box,#chpassModal .box,#tokenModal .box,#assignModal .box,#totpModal .box{background:#161b26;border:1px solid #26303f;border-radius:12px;padding:24px;width:380px;max-width:94vw}
+/* ★ 商城配置那一堆「标签 + 输入框 + 长说明」，380px 太窄了，
+   说明会把输入框挤没（用户报过）。单独加宽它。 */
+#shopCfgModal .box{width:min(660px,94vw);max-height:88vh;overflow-y:auto}
+.l_cfgrow{display:flex;align-items:flex-start;gap:10px;margin-bottom:10px}
+.l_cfgrow>label{width:110px;flex:none;color:#9aa5b1;font-size:13px;padding-top:6px}
+.l_cfgrow>.col{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
+.l_cfgrow textarea{flex:1 1 auto;min-width:0;font-family:monospace;
+                   background:#0d1117;color:#e6edf3;
+                   border:1px solid #30363d;border-radius:6px;padding:6px;
+                   resize:vertical}
+.l_cfgrow .muted{margin:0}
+#extModal h3,#shopCfgModal h3,#ledgerCfgModal h3,#orderModal h3,#chpassModal h3,#tokenModal h3,#assignModal h3,#totpModal h3{font-size:16px}
+#chpassModal input,#tokenModal input{width:100%;margin:10px 0}
+#chpassModal button,#tokenModal button{width:100%}
+#extOpts button{min-width:88px}
+.cfgrow{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.cfgrow label{width:130px;color:#9aa5b1;font-size:13px;flex:none}
+.cfgrow input,.cfgrow select{flex:1}
+/* ★★ textarea 也必须 flex:1 —— 原来只写了 input/select，漏了 textarea。
+   后果：同一行里那段 `.muted` 说明设了 `flex:none`（不收缩）会把整行宽度
+   全占掉，textarea 默认又能被压到「一个字符宽」——
+   于是被挤成一条缝，用户看到的就是「只有一根细滚动条，没有填价格的地方」。
+   （2026-09-28 用户报「笔数档位那里没有填写价格的地方，只有滑动的地方」） */
+.cfgrow textarea{flex:1 1 auto;min-width:200px;font-family:monospace;
+                 background:#0d1117;color:#e6edf3;
+                 border:1px solid #30363d;border-radius:6px;padding:6px;
+                 resize:vertical}
+/* 说明文字允许收缩换行，别跟输入框抢宽度 */
+.cfgrow .muted{flex:0 1 auto;min-width:0}
+.ordtbl td{font-size:12.5px}
+.ordtbl .sm{padding:3px 8px;font-size:11.5px}
+details.card>summary{cursor:pointer;font-size:15px;font-weight:600;color:#c9d1d9;list-style:none;outline:none}
+details.card>summary::-webkit-details-marker{display:none}
+details.card>summary::before{content:'▸ ';color:#7d8590}
+details.card[open]>summary::before{content:'▾ '}
+details.card[open]>summary{margin-bottom:14px}
+pre.tut{background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:16px;font-size:13px;line-height:1.75;color:#c9d1d9;white-space:pre-wrap;word-break:break-word;font-family:"Microsoft YaHei",Consolas,monospace;max-height:420px;overflow:auto;margin-top:12px}
+
+/* ===== 标签式布局 ===== */
+#tabs{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 18px;
+      border-bottom:1px solid #21262d;padding-bottom:0}
+.tab{background:#161b26;border:1px solid #26303f;border-bottom:0;
+     color:#8b949e;border-radius:8px 8px 0 0;padding:9px 16px;
+     cursor:pointer;font-size:14px;margin-bottom:-1px}
+.tab:hover{color:#e6edf3;border-color:#30363d}
+.tab.on{background:#1f6feb;border-color:#1f6feb;color:#fff;font-weight:600}
+#typeTabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.ttab{background:#161b26;border:1px solid #26303f;color:#8b949e;
+      border-radius:20px;padding:7px 16px;cursor:pointer;font-size:13px}
+.ttab:hover{color:#e6edf3}
+.ttab.on{background:#238636;border-color:#238636;color:#fff}
+.tcnt{background:rgba(255,255,255,.18);border-radius:9px;padding:0 6px;
+      font-size:11px;margin-left:4px}
+.badge{background:#da3633;color:#fff;border-radius:9px;padding:1px 8px;
+       font-size:12px;font-weight:600;display:inline-block;line-height:17px}
+.crumb{color:#58a6ff;text-decoration:none}
+.crumb:hover{text-decoration:underline}
+/* 消息流：从上往下，新的在最下面；自己的靠右（像微信） */
+#msgStream{max-height:60vh;overflow-y:auto;display:flex;
+           flex-direction:column;gap:10px;padding:6px 2px;
+           /* ★ 手机上：惯性滚动 + 滚到头别把整页一起带着滚
+              （不带这两条的话，桌面还行，手机上一滑就抖） */
+           -webkit-overflow-scrolling:touch;
+           overscroll-behavior:contain}
+/* 表格太宽时自己横着滚，别把整页撑破（手机上那张表有 5 列） */
+.tblwrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+/* ===== 表格对齐（机器人列表 / 群消息 用）=====
+   第一列**靠左** · 中间各列**居中** ·
+   最后一列：**按钮贴右边，「操作」两个字落在按钮正中间上方**。
+
+   ★ 第一列为什么必须靠左：列宽是按内容撑开的，表格剩下的宽度会
+     按比例摊给各列 —— 第一列往往很宽，一居中名字就飘到列中间、
+     左边空一大块，看着更乱（用户 2026-09-29 明确：左侧要靠左不要留空）。
+
+   ★★ 最后一列的关键是 `width:1%`：这是让列宽**收缩到刚好放下按钮**
+     的老办法。列宽缩到跟按钮一样宽之后：
+       · 表头居中 → 正好落在按钮正中间（用户圈图要的就是这个）
+       · 内容贴右  → 按钮贴着表格右边缘
+     少了 width:1% 的话，这一列会把表格剩余宽度全吃掉，
+     居中就变成「在很大一片空地里居中」，又飘走了。
+     改完务必用无头 Chrome 截个图看（见 _shot_css.py），别靠脑补。 */
+.ctr th,.ctr td{text-align:center}
+.ctr th:first-child,.ctr td:first-child{text-align:left}
+/* ★★ 首尾两列都收缩到「刚好放下内容」（width:1%），
+   **把表格剩下的宽度全留给中间列** —— 这样中间列居中时正好落在
+   表格中间。
+   ★ 只收缩最后一列的话，剩余宽度会全跑到第一列去，中间列就被
+     挤到右边了（用户 2026-09-29 报：「你怎么又把未读挪过来了」）。
+   ★ 只收缩第一列的话，剩余宽度又全跑到最后一列，「操作」又飘了。
+   所以**这两条必须成对存在**，别只改一个。 */
+/* ★ nowrap 不能少：光 width:1% 的话列会被压到最窄、字**换行**竖成一列
+   （「测试群」变成竖排三行）。nowrap = 收缩到「刚好放得下一行」 */
+.ctr th:first-child,.ctr td:first-child{width:1%;white-space:nowrap}
+.ctr th:last-child,.ctr td:last-child{width:1%;white-space:nowrap}
+.ctr th:last-child{text-align:center}
+.ctr td:last-child{text-align:right}
+
+/* ★★ 消息记录那两张表再加一条：**让「未读」那一列吸收剩余的宽度**，
+   其余列全收缩到内容宽度。
+   为什么：3 列时它正好落在表格正中；4 列（群消息）时如果让「消息数」
+   和「未读」平分剩余宽度，「未读」会偏到右边 66% 去（用户报过）。
+   让「未读」一个人吃下剩余宽度，它的中点就贴着表格中心了。
+   ★ nth-last-child(2) = 倒数第二列 = 「未读」（最后一列永远是「操作」） */
+.ctr-mid th,.ctr-mid td{width:1%;white-space:nowrap}
+.ctr-mid th:nth-last-child(2),.ctr-mid td:nth-last-child(2){width:auto}
+.mb{display:flex;max-width:100%}
+.mb.right{justify-content:flex-end}
+.mb .col{max-width:min(620px,78%);display:flex;flex-direction:column;
+         align-items:flex-start}
+.mb.right .col{align-items:flex-end}
+.mmeta{font-size:12px;color:#8b949e;margin:0 4px 4px}
+.bb{background:#1c2331;border:1px solid #262d3a;border-radius:10px;
+    padding:8px 12px;max-width:100%;word-break:break-word;white-space:pre-wrap}
+.mb.right .bb{background:#1f4d33;border-color:#2a6344}
+/* 机器人自己发的（账单/回执）：**跟群友一样靠左**，
+   只是底色深一点 + 虚线框 + 标「机器人」，一眼看出是谁说的。
+   （★ 别再改成居中 —— 用户要的就是左侧那一条聊天流） */
+.mb.bot{justify-content:flex-start}
+.mb.bot .col{align-items:flex-start;max-width:min(620px,78%)}
+.mb.bot .mmeta{color:#8b949e}
+.mb.bot .bb{background:#11161f;border-style:dashed;color:#b9c2cc}
+.bb img{max-width:300px;max-height:300px;border-radius:6px;margin-top:6px;
+        display:block;cursor:zoom-in;border:1px solid #30363d}
+/* 「上次看到这里」的分界线 —— 点进来一眼就知道从哪开始是新的 */
+.newline{text-align:center;color:#d29922;font-size:12px;padding:6px 0;
+         border-top:1px dashed #6b4a10;margin:4px 0 2px}
+/* 「👥 群成员」标签 —— 放在消息流表头「（N 条）」后面，点一下展开成员表 */
+.mchip{background:#21262d;border:1px solid #30363d;border-radius:12px;
+       padding:2px 10px;font-size:12px;color:#58a6ff;text-decoration:none;
+       margin-left:6px;white-space:nowrap}
+.mchip:hover{background:#2d333b;color:#79c0ff}
+/* 成员表（展开在消息流上方，不占用消息区的滚动位置） */
+#memBox{border:1px solid #30363d;border-radius:8px;margin:2px 0 10px;
+        max-height:46vh;overflow-y:auto;background:#11161f;
+        /* ★ 不许被压扁（原因见下面 body.chatting 那条） */
+        flex:0 0 auto}
+.mrow{display:flex;align-items:center;gap:8px;padding:7px 10px;
+      border-bottom:1px solid #1d222b;font-size:13px}
+.mrow:last-child{border-bottom:0}
+.mrow .nm{color:#e6edf3;font-weight:600}
+.mrow .un{color:#8b949e;font-size:12px}
+.mrow .rt{margin-left:auto;color:#8b949e;font-size:12px;white-space:nowrap}
+.mtag{background:#21262d;border-radius:4px;padding:1px 6px;font-size:11px;
+      color:#8b949e}
+.mtag.own{background:#1f4d33;color:#7ee2a8}
+.mtag.bot{background:#3d2f14;color:#e3b341}
+.mtag.adm{background:#132d46;color:#79c0ff}
+/* 使用说明 */
+.helpbody{line-height:1.9;margin-top:10px}
+details.card>summary{cursor:pointer;font-weight:600;font-size:15px;
+                     list-style:none;padding:2px 0}
+details.card>summary::-webkit-details-marker{display:none}
+details.card>summary:before{content:'▸ ';color:#8b949e}
+details[open].card>summary:before{content:'▾ '}
+
+/* ===== 手机端 =====
+   之前手机上整页是溢出的：表格 5 列撑破屏幕、标签挤成两行、
+   聊天区太矮还得在内层滚。这里统一收一下。 */
+@media (max-width:720px){
+  body{padding:10px}
+  h1{font-size:17px;line-height:1.5}
+  #pagev{font-size:11px}
+  .card{padding:12px;border-radius:8px;margin-bottom:12px}
+  .card h2{font-size:14px}
+  /* 标签：小一点、能横着拨，别换行挤成两排 */
+  #tabs{gap:4px;overflow-x:auto;flex-wrap:nowrap;
+        -webkit-overflow-scrolling:touch;padding-bottom:2px}
+  .tab{padding:8px 11px;font-size:12.5px;white-space:nowrap;flex:0 0 auto}
+  #typeTabs{gap:6px;flex-wrap:nowrap;overflow-x:auto;
+            -webkit-overflow-scrolling:touch}
+  .ttab{padding:6px 12px;font-size:12.5px;white-space:nowrap;flex:0 0 auto}
+  /* 表格：字号小一点、单元格收紧，外面套一层横向滚动 */
+  table{font-size:12.5px}
+  th,td{padding:8px 7px}
+  button{padding:8px 14px;font-size:13px}
+  button.sm{padding:5px 9px;font-size:12px}
+  .hint{font-size:12.5px;padding:10px}
+  input,select{font-size:13px;padding:8px 10px}
+  #note,#token,#type,#duration{width:100%}
+  /* 聊天区：高一点，别在矮框里掏着滚 */
+  #msgStream{max-height:calc(100vh - 260px);min-height:240px}
+  .mb .col{max-width:88%}
+  .bb img{max-width:100%}
+  .helpbody{font-size:13px}
+  /* 群成员：手机上「41 条 · 最后 9-29 04:20」挤不下会把卡片撑破，
+     所以**允许换行**，换下去之后仍然靠右 */
+  .mrow{flex-wrap:wrap}
+  .mrow .rt{margin-left:auto}
+
+  /* ★ 群名别被挤成一列竖排 —— 让表格按内容撑开，宽了就横向滚 */
+  .tblwrap table{width:auto;min-width:100%}
+  .tblwrap th,.tblwrap td{white-space:nowrap}
+
+  /* ★ 弹窗：手机上不能超过屏幕宽，内容高了要能在里面滚
+     （用户 2026-09-29：输谷歌验证码那个框溢出屏幕了）
+     桌面上的规则是 width:380px;max-width:94vw —— 在窄屏手机上
+     94vw 是够的，但弹窗里只要有长内容（密钥、otpauth 链接、日志里
+     那一长串）就会把盒子顶出去，而且 align-items:center 会让它
+     上下都超出、滚都滚不到。这里统一改成：留 12px 边距、撑满、
+     高了就在盒子里滚。 */
+  #extModal,#shopCfgModal,#ledgerCfgModal,#orderModal,#chpassModal,
+  #tokenModal,#assignModal,#totpModal{padding:12px;overflow-y:auto}
+  #extModal .box,#shopCfgModal .box,#ledgerCfgModal .box,#orderModal .box,
+  #chpassModal .box,#tokenModal .box,#assignModal .box,#totpModal .box{
+    width:100%;max-width:100%;padding:18px;max-height:86vh;overflow-y:auto}
+  /* 弹窗里的输入框都撑满（验证码那个原来只占一半宽） */
+  #totpModal input,#chpassModal input,#tokenModal input,#assignModal input{
+    width:100%}
+  /* 长串（otpauth 链接、密钥、IP、UA）允许断行，别把盒子顶宽。
+     ★ 用 break-word 不用 anywhere —— anywhere 会改变最小宽度计算，
+       把表格的列宽挤变形（.tblwrap table 靠内容撑开） */
+  .hint,.muted,.helpbody,#totp-body,#totpTip{overflow-wrap:break-word;
+                                             word-break:break-word}
+}
+
+/* ===== 全屏聊天（点进某个群时）=====
+   手机屏幕小，还留着标题、标签、卡片边距的话，
+   聊天区又矮、底部又是一片空白。这里整页切成聊天模式。 */
+body.chatting{padding:0;overflow:hidden}
+body.chatting #main{max-width:none}
+body.chatting #tabs,
+body.chatting #pagev{display:none}
+body.chatting .card:not(#msgLv3){display:none}
+/* ★★ 全屏聊天必须用 position:fixed 钉在视口上，**不能**只写 height:100vh。
+   写 height:100vh 的话，这块的位置还受父元素的 padding/margin 影响 ——
+   父级上哪怕只有 10px 边距，整块就比视口高出 10px，页面自己又长出
+   第二条滚动条。表现就是「滚轮滚的是聊天区那条，滚到底还是看不全，
+   还得再去拖页面右边那条」（用户报过）。
+   fixed + inset:0 之后父元素怎么改都不会影响它，页面也只有一条滚动条。 */
+body.chatting #msgLv3{position:fixed;inset:0;z-index:50;
+                      margin:0;border:0;border-radius:0;padding:10px;
+                      display:flex;flex-direction:column}
+body.chatting #msgLv3 h2{flex:0 0 auto;font-size:14px;margin-bottom:8px}
+body.chatting #msgStream{flex:1 1 auto;max-height:none;min-height:0}
+/* ★★ 群成员表：**必须给 flex:0 0 auto**！
+   全屏聊天时 #msgLv3 是个 flex 列，表头（h2）和消息区都写了 flex，
+   唯独中间这块没写 —— 于是它成了**唯一可压缩的项**被挤扁。
+   而且 flex 是按内容大小分摊压缩量的：**人越多内容越高、被压得越狠**，
+   表现就是「人多的群点开只剩一条缝，人少（或私聊）的群正常」
+   （2026-09-29 用户截图报的，两个群一对比就是这个规律）。
+   上限给 40vh，剩下的高度留给消息区（它自己会滚）。 */
+body.chatting #memBox{flex:0 0 auto;max-height:40vh}
+
+/* ===== 添加到桌面 ===== */
+/* 按钮：小药丸，不抢眼（只在手机 + 没装过的时候显示） */
+.addhome{background:#1f6feb;border:1px solid #388bfd;color:#fff;border-radius:999px;
+  padding:3px 11px;font-size:12px;cursor:pointer;vertical-align:middle;
+  margin-left:8px;white-space:nowrap}
+.addhome:active{background:#1a5fd0}
+/* 教用户怎么加桌面的弹层：贴底弹出，像手机上的操作指引。
+   ★ z-index 比登录遮罩(99)和别的弹层(101)都高 —— 它上面盖着一层半透明黑，
+     留在下面的话会被挡住 */
+#homeTip{position:fixed;inset:0;background:rgba(8,11,17,.9);z-index:102;
+  display:none;align-items:flex-end;justify-content:center;padding:16px}
+#homeTip .ht-box{background:#161b26;border:1px solid #26303f;border-radius:14px;
+  padding:20px;max-width:440px;width:100%;font-size:14px;line-height:2}
+#homeTip h3{font-size:16px;margin-bottom:8px}
+#homeTip .ht-note{color:#7d8590;font-size:12px;line-height:1.7;margin-top:12px}
+#homeTip .ht-k{background:#21262d;border:1px solid #30363d;border-radius:5px;
+  padding:1px 7px;margin:0 2px;white-space:nowrap;color:#e6edf3}
+#homeTip button{margin-top:16px;width:100%}
+</style>
+</head>
+<body>
+
+<div id="mask"><div class="box">
+  <h1>🔐 管理面板</h1>
+  <div class="sub">管理员只填密码；商户填账号 + 密码</div>
+  <input id="user" placeholder="账号（管理员留空）" onkeydown="if(event.key==='Enter')login()">
+  <input id="pw" type="password" placeholder="密码" onkeydown="if(event.key==='Enter')login()">
+  <button onclick="login()">进入</button>
+</div></div>
+
+<div class="wrap" id="main" style="display:none">
+  <h1>🤖 TG 机器人管理面板 <span id="whoami" class="muted" style="font-size:14px"></span>
+    <span id="pagev" class="muted" style="font-size:12px;display:none"
+          title="页面文件的改动时间。刷新后这个时间没变 = 浏览器还在用旧页面"></span>
+    <!-- 只在手机上显示（电脑上「加桌面」没意义），已经装过就不再显示 -->
+    <button id="addHome" class="addhome" style="display:none"
+            onclick="addToHome()">📲 添加到桌面</button>
+  </h1>
+
+  <!-- ===== 顶部标签入口 ===== -->
+  <div id="tabs">
+    <button class="tab on" data-pane="msg">📜 消息记录</button>
+    <button class="tab" data-pane="bots">📋 机器人列表</button>
+    <button class="tab" data-pane="add">➕ 添加机器人</button>
+    <button class="tab" data-pane="merch">👥 商户管理</button>
+    <button class="tab" data-pane="help">📖 使用说明</button>
+    <button class="tab" data-pane="logs">🔐 登录记录</button>
+  </div>
+
+  <!-- ===== ① 消息记录（登录默认看到这个）=====
+       三级下钻：机器人 → 群 → 群内消息 -->
+  <div class="pane" id="pane-msg">
+    <div id="msgLv1" class="card">
+      <h2>📋 机器人列表 <span class="cnt" id="cnt-msg"></span></h2>
+      <div id="msgBots"><div class="empty">加载中…</div></div>
+    </div>
+
+    <div id="msgLv2" class="card" style="display:none">
+      <h2><a href="#" class="crumb" onclick="msgGoto(1);return false">📋 机器人列表</a>
+        <span class="muted">/</span> <span>群消息</span>
+        <span class="cnt" id="cnt-msg2"></span></h2>
+      <div id="msgChats"><div class="empty">加载中…</div></div>
+    </div>
+
+    <div id="msgLv3" class="card" style="display:none">
+      <h2><a href="#" class="crumb" onclick="msgGoto(1);return false">📋 机器人列表</a>
+        <span class="muted">/</span>
+        <a href="#" class="crumb" onclick="msgGoto(2);return false">群消息</a>
+        <span class="muted">/</span> <span id="msgChatName"></span>
+        <span class="cnt" id="cnt-msg3"></span>
+        <a href="#" class="mchip" id="memChip"
+           onclick="msgToggleMembers();return false">👥 群成员</a></h2>
+      <div id="memBox" style="display:none"></div>
+      <div id="msgStream"><div class="empty">加载中…</div></div>
+    </div>
+  </div>
+
+  <!-- ===== ② 机器人列表：先选类型，再看那一类的机器人 ===== -->
+  <div class="pane" id="pane-bots" style="display:none">
+    <div id="typeTabs"></div>
+
+    <div class="card botcard" id="card-kefu">
+      <h2>📨 客服机器人 <span class="cnt" id="cnt-kefu"></span></h2>
+      <div class="hint">
+        客户私聊机器人 → 消息转发到<b>你自己的 Telegram</b> → 你回复那条消息 → 自动发给客户。<br>
+        使用者在 Telegram 里给机器人发 <code>/admin 绑定码</code> 完成绑定。
+      </div>
+      <div id="list-kefu"><div class="empty">加载中…</div></div>
+    </div>
+
+    <div class="card botcard" id="card-usdt">
+      <h2>💰 USDT 助手 <span class="cnt" id="cnt-usdt"></span></h2>
+      <div class="hint">
+        绑定后机器人会自动带出底部菜单：<b>📡 地址监听 · 🔍 查U交易 · 💱 查U汇率 · 🗂 地址管理 · 👥 操作人</b><br>
+        也可以直接发 TRC20 地址查询（返回余额 + 最近交易），或发 <code>/watch 地址 备注</code> 添加监听。<br>
+        汇率来自<b>欧易(OKX)场外商家的实时挂单价</b>。<br>
+        <b>注意</b>：只有 USDT 的普通转账会被推送（过滤掉授权等操作）；刚添加监听时先建基线，不会把历史交易推一遍。
+      </div>
+      <div id="list-usdt"><div class="empty">加载中…</div></div>
+    </div>
+
+    <div class="card botcard" id="card-shop">
+      <h2>🛒 商城机器人 <span class="cnt" id="cnt-shop"></span></h2>
+      <div class="hint">
+        <b>能量自助充值</b>：客户从自己钱包转 TRX 到你的收款地址，
+        系统自动把能量发给<b>转账的那个地址</b>。<br>
+        客户<b>不需要登记地址</b>、不需要在机器人里下单，转了就发货 —— 也就不存在「发错人」的问题。<br>
+        <b>必须先配「收款地址」</b>，点「⚙️ 配置」填写。<br>
+        ⚠️ 客户必须从<b>自己的钱包</b>转。从交易所直接转的话，能量会发到交易所地址上（白送）。
+      </div>
+      <div id="list-shop"><div class="empty">加载中…</div></div>
+    </div>
+
+    <div class="card botcard" id="card-ledger">
+      <h2>📒 记账机器人 <span class="cnt" id="cnt-ledger"></span></h2>
+      <div class="hint">
+        群里记账：成员发 <code>+100 张三</code> 就记一笔，发 <code>账单</code> 出账。<br>
+        ⚠️ <b>第一步必须关掉 Group Privacy</b>（不关的话收不到群里的普通消息，记账会全废）：<br>
+        　　<b>@BotFather → /mybots → 选机器人 → Bot Settings → Group Privacy → Turn off</b><br>
+        　　关完<b>把机器人踢出群、再重新拉一次</b>，否则设置不生效。<br>
+        　　客户版说明见项目里的 <code>记账机器人_客户使用说明.txt</code>，可直接转发。
+      </div>
+      <div id="list-ledger"><div class="empty">加载中…</div></div>
+    </div>
+
+    <div class="card" id="merch-empty" style="display:none">
+      <h2>👋 欢迎</h2>
+      <div class="hint">
+        你名下还没有机器人。<br>
+        请联系管理员给你分配，分配好之后刷新本页就能看到。
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== ③ 添加机器人 ===== -->
+  <div class="pane" id="pane-add" style="display:none">
+    <div class="card" id="card-add">
+      <h2>➕ 添加机器人</h2>
+      <div class="row">
+        <!-- ★ 顺序 = 用户指定的：记账 → 客服 → USDT → 商城。
+             改这里的同时 TYPE_TABS 和 manager.RUNNERS 也要一起改。 -->
+        <select id="type">
+          <option value="ledger">记账机器人</option>
+          <option value="kefu">客服机器人</option>
+          <option value="usdt">USDT 助手</option>
+          <option value="shop">商城机器人</option>
+        </select>
+        <select id="duration"></select>
+        <input id="note" placeholder="备注（例如：张三-售后）">
+        <input id="token" placeholder="机器人 token（BotFather 给的那串）">
+        <button onclick="addBot()">添加</button>
+      </div>
+      <!-- 客户自带服务器：机器人跑在客户自己那台机器上，本面板**不启动**它
+           （同一个 token 两边跑会 409 冲突，谁都收不到消息）。
+           消息靠客户那边主动回传，操作列里会多一个「📋 客户配置」
+           （点一下就把客户要填的那段配置复制出来，里面**没有密钥** ——
+            回传的暗号是两边从 token 现算的，用户不用管）。 -->
+      <label class="muted" style="display:flex;align-items:center;gap:8px;
+                                   margin-top:12px;cursor:pointer">
+        <input type="checkbox" id="remote" style="width:auto;margin:0">
+        跑在客户自己的服务器上（本面板不运行它，消息由它回传）
+      </label>
+      <div class="muted" id="typeHint">添加后系统会自动验证 token，并生成一个绑定码</div>
+    </div>
+  </div>
+
+  <!-- ===== ④ 商户管理 ===== -->
+  <div class="pane" id="pane-merch" style="display:none">
+    <div class="card" id="card-merch">
+      <h2>👥 商户管理 <span class="cnt" id="cnt-merch"></span></h2>
+      <div class="hint">
+        给客户开个账号 → 把机器人分给他 → 他自己登录 <code>/m</code> 配自己的上游 Key、收款地址和价格。<br>
+        <b>他只能看到自己名下的机器人</b>，看不到你的、也看不到别人的。
+      </div>
+      <div class="row">
+        <input id="m_name" placeholder="客户名字（例如：张三）">
+        <input id="m_user" placeholder="登录账号（小写字母数字下划线，3~20位）">
+        <button onclick="addMerch()">➕ 新建商户</button>
+      </div>
+      <div id="merch-new" class="muted" style="margin-top:8px"></div>
+      <div id="list-merch" style="margin-top:12px"></div>
+    </div>
+  </div>
+
+  <!-- ===== ⑥ 登录记录 ===== -->
+  <div class="pane" id="pane-logs" style="display:none">
+    <div class="card">
+      <h2 style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span>🔐 登录记录 <span class="cnt" id="cnt-logs"></span></span>
+        <span style="flex:1"></span>
+        <button class="gray sm" onclick="loadLogins()">刷新</button>
+        <button class="gray sm" id="btn-reveal"
+                onclick="revealLogins()">🔓 看真实 IP</button>
+        <button class="red sm" onclick="clearLogins()">清空</button>
+      </h2>
+      <!-- 谷歌验证码
+           ★ 只在**还没启用**的时候出来（教你怎么绑）；
+             启用之后里面是空的，整块看不见 —— 用户 2026-09-28 明确：
+             「默认就是开启了，也没有换一个密钥的选项入口」
+           ★★ `totp-body` 这个容器**不能删** —— loadTotp() 找不到它就直接
+              return，结果是「没绑定的时候什么都不显示」，永远没法绑。 -->
+      <div id="totp-box" style="margin:12px 0">
+        <div id="totp-body" class="muted"></div>
+      </div>
+
+      <div id="list-logs"><div class="empty">加载中…</div></div>
+    </div>
+  </div>
+
+  <!-- 输谷歌验证码的弹窗（看真实 IP / 清空 / 换密钥都用它） -->
+  <div id="totpModal" style="display:none">
+    <div class="box">
+      <h3 id="totpTitle">🔐 输入谷歌验证码</h3>
+      <div class="muted" style="margin:8px 0 14px" id="totpTip">
+        打开手机上的验证器 App，输入当前 6 位数字。
+      </div>
+      <input id="totp_code" inputmode="numeric" maxlength="6"
+             placeholder="6 位数字" autocomplete="one-time-code"
+             style="text-align:center;letter-spacing:6px;font-size:20px">
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button style="flex:1" onclick="submitTotp()">确定</button>
+        <button class="gray" style="flex:1" onclick="closeTotp()">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== ⑤ 使用说明 ===== -->
+  <div class="pane" id="pane-help" style="display:none">
+    <!-- ★ 这块是**给管理员看的**：里面让人「先看怎么拿到机器人」，
+         而那一节商户根本看不到，留着反而误导。
+         商户端整块隐藏，直接从「商城机器人」那节开始。 -->
+    <div class="card" data-for="admin">
+      <h2>📖 使用说明</h2>
+      <div class="hint">
+        第一次用先看「怎么拿到机器人」。下面按类型分开写，点标题展开。
+      </div>
+    </div>
+
+    <!-- ★ 每块上的 data-for 属性 = 这块给谁看。
+         商户端只显示标着 shop 的那块（applyRoleTabs 里按它隐藏），
+         其它全是管理员专属。
+         ★ 注释里别写出「属性名 + 等号 + 引号」的完整样子 ——
+           前端测试台是用正则从页面里抠这些块的，写在注释里会被当成真块。 -->
+    <details class="card" data-for="admin" open>
+      <summary>🆕 怎么拿到机器人（两种方式）<button class="gray sm" style="font-weight:400"
+        onclick="event.preventDefault();event.stopPropagation();copyHelp(this)"
+        title="把这一节整段复制，直接发给对方">📋 复制</button></summary>
+      <div class="helpbody">
+        <b>方式一 · 直接找客服要（推荐）</b><br>
+        把你要哪种机器人告诉客服，客服会给你一个<b>机器人 token</b> 或者直接帮你配好。<br>
+        你自己只需要在 Telegram 里给机器人发一条绑定指令就完事了。<br><br>
+        <b>方式二 · 自己建一个</b><br>
+        去 Telegram 找 <code>@BotFather</code> 建机器人，把 token 给管理员，管理员在面板里添加。<br>
+        下面是详细步骤：
+      </div>
+      <div class="row" style="margin:10px 0 4px">
+        <button onclick="copyTut(TUT)">📋 复制整段教程</button>
+        <button class="gray" onclick="copyTut(TUT_MAKE)">📋 只复制「建机器人拿token」那段</button>
+      </div>
+      <div class="muted">复制后直接粘贴发给朋友，他照着做就行</div>
+      <pre class="tut" id="tut"></pre>
+    </details>
+
+    <details class="card" data-for="kefu">
+      <summary>📨 客服机器人<button class="gray sm" style="font-weight:400"
+        onclick="event.preventDefault();event.stopPropagation();copyHelp(this)"
+        title="把这一节整段复制，直接发给对方">📋 复制</button></summary>
+      <div class="helpbody">
+        <b>它是干什么的</b>：客户私聊机器人 → 消息自动转发到<b>你自己的 Telegram</b> → 你回复那条消息 → 自动发给客户。<br><br>
+        <b>怎么开始用</b><br>
+        1. 管理员把机器人分给你，给你一个<b>绑定码</b>（8 位）<br>
+        2. 你在 Telegram 里给机器人发 <code>/admin 绑定码</code><br>
+        3. 机器人回「✅ 绑定成功」就好了<br><br>
+        <b>怎么回复客户</b><br>
+        • 客户发消息 → 你收到转发 → <b>长按那条消息 → 点「回复」</b> → 输入内容发送<br>
+        • ⚠️ 不点「回复」直接发，消息发不出去<br><br>
+        <b>常用指令</b><br>
+        <code>/list</code> 看最近联系过的客户　<code>/help</code> 看全部指令<br><br>
+        ⚠️ 手机上的 Telegram 要保持登录，别把这个机器人拉黑或删对话，否则收不到客户消息。
+      </div>
+    </details>
+
+    <details class="card" data-for="usdt">
+      <summary>💰 USDT 助手<button class="gray sm" style="font-weight:400"
+        onclick="event.preventDefault();event.stopPropagation();copyHelp(this)"
+        title="把这一节整段复制，直接发给对方">📋 复制</button></summary>
+      <div class="helpbody">
+        <b>它是干什么的</b>：查 TRX/USDT 余额、盯地址、看实时汇率。<br><br>
+        <b>怎么开始用</b>：绑定后机器人底部会自己长出菜单，直接点就行。<br><br>
+        <b>底部菜单</b><br>
+        📡 <b>地址监听</b> —— 往这个地址转 U，机器人自动推给你<br>
+        🔍 <b>查U交易</b> —— 查某个地址的余额和最近交易<br>
+        💱 <b>查U汇率</b> —— 欧易场外商家的实时挂单价<br>
+        🗂 <b>地址管理</b> —— 看/删自己加的监听地址<br>
+        👥 <b>操作人</b> —— 让别人也能用这个机器人<br><br>
+        <b>也可以直接发</b><br>
+        • 发一个 TRC20 地址 → 返回余额 + 最近交易<br>
+        • 发 <code>/watch 地址 备注</code> → 添加监听<br><br>
+        ⚠️ 只有 USDT 的<b>普通转账</b>会推送（授权之类的不推）；刚加监听时先建基线，不会把历史交易一股脑推一遍。
+      </div>
+    </details>
+
+    <details class="card" data-for="shop">
+      <summary>🛒 商城机器人（能量自助充值）<button class="gray sm" style="font-weight:400"
+        onclick="event.preventDefault();event.stopPropagation();copyHelp(this)"
+        title="把这一节整段复制，直接发给对方">📋 复制</button></summary>
+      <div class="helpbody">
+        <b>它是干什么的</b>：客户自己转 TRX 过来，系统自动把能量发给<b>转账的那个地址</b>。<br>
+        客户不用登记地址、不用下单，转了就发货 —— 也就不存在发错人的问题。<br><br>
+        <b>你的准备工作</b><br>
+        1. 点机器人那行的「⚙️ 配置」<br>
+        2. 填<b>收款地址</b>（你自己的收款地址）<br>
+        3. 填单价、每个单位发多少能量<br>
+        4. 填上游 API Key（没有自己的货源就用「自定义上游」，照你供货商的文档填）<br>
+        5. 点「测试连接」确认通了<br><br>
+        <b>客户怎么操作</b><br>
+        私聊机器人 → 点「⚡ 充能量」→ 按提示转 TRX → 自动到账<br><br>
+        <b>面板上能看什么</b><br>
+        📋 <b>订单</b> —— 每笔收款和发货状态<br>
+        • 发货失败的可以点「重发」<br>
+        • 拿不准的点「标记已处理」<br>
+        • 面板会提醒你上游余额够不够<br><br>
+        ⚠️⚠️ <b>客户必须从自己的钱包转！</b>从交易所直接转的话，能量会发到交易所地址上（白送）。
+      </div>
+    </details>
+
+    <details class="card" data-for="ledger">
+      <summary>📒 记账机器人<button class="gray sm" style="font-weight:400"
+        onclick="event.preventDefault();event.stopPropagation();copyHelp(this)"
+        title="把这一节整段复制，直接发给对方">📋 复制</button></summary>
+      <div class="helpbody">
+        <b>它是干什么的</b>：群里记账。谁付了多少、日切对账。<br><br>
+        <b>⚠️ 第一步 · 必须关掉 Group Privacy</b>（不关的话群里发 <code>+100</code> 机器人根本收不到）：<br>
+        　　<b>@BotFather → /mybots → 选机器人 → Bot Settings → Group Privacy → Turn off</b><br>
+        　　<b>关完必须把机器人踢出群、再重新拉一次</b>，否则设置不生效。<br><br>
+        <b>拉进群之后</b>：群里发一条消息让它认识这个群，建议给它「删除消息」权限（清理消息要用）。<br><br>
+        <b>群里怎么记账</b><br>
+        <code>+100</code> 入款　<code>+100 张三</code> 带人名　<code>-50</code> 减分<br>
+        回复某人的消息再发 <code>+100</code> → 记到那个人头上<br><br>
+        <b>看账</b>：<code>账单</code>　<code>昨日账单</code>　<code>完整账单</code>　<code>撤销</code>　<code>清空</code><br><br>
+        <b>设置</b>：<code>汇率 7.2</code>　<code>设置费率 10</code>　<code>日切 3</code>　<code>查看费率</code><br><br>
+        <b>群里管理</b>：<code>通知所有人 内容</code>　<code>群成员</code>　<code>/del</code>（清理消息）<br><br>
+        <b>给群里的人开权限</b>：回复某人的消息发 <code>添加权限</code>／<code>删除权限</code>，发 <code>操作员</code> 看列表<br><br>
+        📄 完整版可以转发给群主：项目里的 <code>记账机器人_客户使用说明.txt</code>
+      </div>
+    </details>
+
+    <details class="card" data-for="admin">
+      <summary>📜 消息记录（把群消息存自己电脑上）<button class="gray sm" style="font-weight:400"
+        onclick="event.preventDefault();event.stopPropagation();copyHelp(this)"
+        title="把这一节整段复制，直接发给对方">📋 复制</button></summary>
+      <div class="helpbody">
+        <b>它是干什么的</b>：把机器人看到的群消息<b>存在你自己电脑上</b>，面板里随时翻、随时搜。只有管理员能看。<br><br>
+        <b>要开吗</b>：<b>记账机器人默认就是开的</b>，不用做任何设置。<br>
+        不想记哪个群，就在群列表里点那个群的「关闭记录」。<br>
+        （保留时长固定 <b>48 小时</b>，到点自动删）<br><br>
+        <b>怎么用</b><br>
+        • 点机器人 → 看它有哪些群 → 点群 → 看消息<br>
+        • 右边有红数字=还没看过的条数<br>
+        • 点图放大（滚轮缩放、拖动平移）<br>
+        • 右键会话可以<b>置顶</b><br>
+        • 新消息会自己冒出来，不用刷新<br><br>
+        <b>支持哪些机器人</b>：<b>只支持记账机器人</b>。<br>
+        （其它类型（客服 / USDT / 商城）在群里压根收不到普通消息，
+        所以没有这个功能）<br><br>
+        ⚠️ 记账机器人要收到群里的普通消息，还是得先关掉 Group Privacy（见上面）。<br>
+        ⚠️ 只有<b>开始记录之后</b>的消息才看得到，之前的翻不出来；超期自动删。<br>
+        🔒 数据只在你本机，不会发到任何服务器。
+      </div>
+    </details>
+
+    <details class="card" data-for="admin">
+      <summary>❓ 常见问题<button class="gray sm" style="font-weight:400"
+        onclick="event.preventDefault();event.stopPropagation();copyHelp(this)"
+        title="把这一节整段复制，直接发给对方">📋 复制</button></summary>
+      <div class="helpbody">
+        <b>群里发 +100 机器人没反应？</b><br>
+        99% 是 Group Privacy 没关，或者关了没把机器人踢出去重拉。回去看「记账机器人」那节。<br><br>
+        <b>机器人不回消息？</b><br>
+        ① 检查机器人是不是被停用了（面板上能看状态）<br>
+        ② 检查是不是到期了 —— 续期就恢复<br>
+        ③ 重启一下（停用再启用）<br><br>
+        <b>消息记录里没有我要的机器人？</b><br>
+        <b>只有记账机器人</b>有这个功能，而且是<b>默认就开的</b>，
+        不用手动开。其它类型（客服 / USDT / 商城）在群里收不到普通消息，
+        所以没有这个功能。<br><br>
+        <b>消息记录里图一直转圈？</b><br>
+        图是后台慢慢下的（一条一条来），等一会儿会自己出来。还是不出来的话看看运行日志。<br><br>
+        <b>Token 填错了 / 想换一个机器人？</b><br>
+        点那行的「🔑 Token」改。<br><br>
+        <b>机器人到期了怎么办？</b><br>
+        点「续期」（商户要联系管理员）。
+      </div>
+    </details>
+  </div>
+</div>
+
+<div id="shopCfgModal" style="display:none">
+  <div class="box" style="width:520px">
+    <h3 id="cfgTitle">商城配置</h3>
+    <div id="cfgBody" style="margin:14px 0;max-height:60vh;overflow:auto"></div>
+    <div class="row" style="justify-content:flex-end">
+      <button class="gray" onclick="closeCfg()">取消</button>
+      <button onclick="saveCfg()">保存</button>
+    </div>
+  </div>
+</div>
+
+<div id="ledgerCfgModal" style="display:none">
+  <div class="box" style="width:560px">
+    <h3 id="ledTitle">📒 记账配置</h3>
+    <div id="ledBody" style="margin:14px 0;max-height:60vh;overflow:auto"></div>
+    <div class="row" style="justify-content:flex-end">
+      <button class="gray" onclick="closeLed()">取消</button>
+      <button onclick="saveLed()">保存</button>
+    </div>
+  </div>
+</div>
+
+<div id="orderModal" style="display:none">
+  <div class="box" style="width:820px">
+    <h3 id="ordTitle">订单</h3>
+    <div class="muted" style="margin:8px 0 14px" id="ordSub"></div>
+    <div id="ordBody" style="max-height:62vh;overflow:auto"></div>
+    <button class="gray" style="width:100%;margin-top:16px" onclick="closeOrd()">关闭</button>
+  </div>
+</div>
+
+<div id="extModal" style="display:none">
+  <div class="box">
+    <h3 id="extTitle">续期</h3>
+    <div class="muted" style="margin:8px 0 16px">选一个时长，从「现在」开始重新计算到期时间</div>
+    <div id="extOpts" class="row" style="justify-content:center"></div>
+    <button class="gray" style="width:100%;margin-top:18px" onclick="closeExt()">取消</button>
+  </div>
+</div>
+
+<div id="chpassModal" style="display:none">
+  <div class="box">
+    <h3>🔑 修改密码</h3>
+    <div class="muted" style="margin:8px 0 16px" id="chpassHint">为了安全，请先把初始密码改掉</div>
+    <input id="cp_old" type="password" placeholder="原密码">
+    <input id="cp_new" type="password" placeholder="新密码（至少 6 位，别纯数字">
+    <input id="cp_new2" type="password" placeholder="再输一遍新密码"
+           onkeydown="if(event.key==='Enter')doChpass()">
+    <button onclick="doChpass()">确定修改</button>
+    <button class="gray" id="cpCancel" style="width:100%;margin-top:8px"
+            onclick="closeChpass()">先不改</button>
+  </div>
+</div>
+
+<div id="tokenModal" style="display:none">
+  <div class="box">
+    <h3 id="tkTitle">换机器人 Token</h3>
+    <div class="muted" style="margin:8px 0 16px">
+      填 BotFather 给的那串。<b>换完记得新机器人里重新发绑定码</b>。
+    </div>
+    <input id="tk_val" placeholder="123456789:AAE...">
+    <button onclick="saveToken()">保存</button>
+    <button class="gray" style="width:100%;margin-top:8px"
+            onclick="closeToken()">取消</button>
+  </div>
+</div>
+
+<div id="assignModal" style="display:none">
+  <div class="box" style="width:640px">
+    <h3 id="asTitle">分配机器人</h3>
+    <div class="muted" style="margin:8px 0 14px">
+      勾上的划给他，取消勾的收回来。<br>
+      ⚠️ 划过去时<b>会自动清空收款地址和上游 Key</b> —— 那本来是你的，
+      不清的话他一进去就看见了。
+    </div>
+    <div id="asBody" style="max-height:55vh;overflow:auto"></div>
+    <div class="row" style="justify-content:flex-end;margin-top:16px">
+      <button class="gray" onclick="closeAssign()">取消</button>
+      <button onclick="doAssign()">确定</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<!-- 添加到桌面的操作指引（iOS 没有一键的接口，只能教） -->
+<div id="homeTip" onclick="if(event.target===this)closeHomeTip()">
+  <div class="ht-box">
+    <h3>📲 把面板加到手机桌面</h3>
+    <div id="htBody" class="ht-steps"></div>
+    <div class="ht-note">
+      加完之后点桌面上的图标就能直接进面板，<b>不用再输密码</b>
+      （密码存在这台手机里）。
+    </div>
+    <button onclick="closeHomeTip()">知道了</button>
+  </div>
+</div>
+
+<script>
+// /m 是给客户的商户入口，和 / 用同一份页面
+var IS_M = location.pathname.indexOf('/m') === 0;
+var PW = localStorage.getItem(IS_M ? 'm_pw' : 'panel_pw') || '';
+var TOK = localStorage.getItem(IS_M ? 'm_token' : 'panel_token') || '';
+var ME = {role:'admin'};          // 当前身份，登录后由服务端告诉我们
+
+// 登录页按入口显示不同的话术
+if(IS_M){
+  document.addEventListener('DOMContentLoaded', function(){
+    var h = document.querySelector('#mask h1');
+    var s = document.querySelector('#mask .sub');
+    if(h) h.textContent = '🏪 商户后台';
+    if(s) s.textContent = '用你的账号和密码登录';
+  });
+  document.title = '商户后台';
+}
+
+function toast(msg){
+  var t=document.getElementById('toast');
+  t.textContent=msg; t.style.display='block';
+  clearTimeout(t._h); t._h=setTimeout(function(){t.style.display='none';},3000);
+}
+
+// 页面上任何脚本报错都要看得见 —— 不然就是「点了没反应」，没法排查
+window.onerror = function(m, src, line){
+  try{ toast('页面出错：' + m + '（第 ' + line + ' 行）'); }catch(e){}
+  return false;
+};
+
+function apiHeaders(){
+  var h = {'Content-Type':'application/json'};
+  if(TOK) h['X-Panel-Token'] = TOK;     // 商户：签过名的 token
+  if(PW)  h['X-Panel-Pass']  = PW;      // 管理员：原来的密码头
+  return h;
+}
+
+function api(path, opts){
+  opts = opts || {};
+  opts.headers = Object.assign(apiHeaders(), opts.headers||{});
+  return fetch(path, opts).then(function(r){
+    if(r.status===401){
+      // 把服务端的具体原因显示出来（可能是「密码错误次数过多，已锁定」）
+      return r.json().then(function(d){
+        logout(d && d.error ? d.error : '登录已过期');
+        throw new Error('401');
+      }).catch(function(e){
+        if(!(e instanceof Error) || e.message!=='401') logout('登录已过期');
+        throw new Error('401');
+      });
+    }
+    if(r.status===403){
+      // 没改初始密码：弹改密码框，但别把他登出
+      return r.json().then(function(d){
+        if(d && d.code==='must_change'){ openChpass(true); }
+        return d;
+      });
+    }
+    return r.json();
+  });
+}
+
+function login(){
+  var u = ((document.getElementById('user')||{}).value||'').trim();
+  var p = document.getElementById('pw').value.trim();
+  if(!p){ toast('请输入密码'); return; }
+
+  if(!u){
+    // 管理员：用户名留空，走老的密码头
+    PW = p; TOK = '';
+    api('/api/bots').then(function(d){
+      _setLS('pw', PW); _setLS('token', '');
+      startUI(d);
+    }).catch(function(){ toast('密码不对'); });
+    return;
+  }
+  // 商户
+  api('/api/login', {method:'POST', body:JSON.stringify({user:u, pass:p})})
+    .then(function(d){
+      if(!d || !d.ok){ toast((d&&d.error)||'登录失败'); return; }
+      TOK = d.token || ''; PW = '';
+      _setLS('token', TOK); _setLS('pw', '');
+      if(d.must_change){ openChpass(true); return; }
+      api('/api/bots').then(startUI).catch(function(){});
+    }).catch(function(){ toast('登录失败'); });
+}
+
+// ★ / 和 /m 各存各的登录态，互不串门
+function _setLS(k, v){
+  var key = (IS_M ? 'm_' : 'panel_') + k;
+  if(v) localStorage.setItem(key, v);
+  else localStorage.removeItem(key);
+}
+
+function startUI(d){
+  if(!d || !d.ok) return;
+  document.getElementById('mask').style.display='none';
+  document.getElementById('main').style.display='block';
+  // ★ 换了个人登录，setHTML 的「上次画过什么」缓存必须清掉，
+  //   不然可能把上一个人的页面原样留着不重画
+  clearHTMLCache();
+  applyRole(d.me);
+  render(d);
+  // ★ 登录进来默认停在「📜 消息记录」（上次看的是哪个标签就回哪个）
+  //   ★ 商户端没有「消息记录」，默认停在「📋 机器人列表」
+  var dft = (ME.role === 'admin') ? 'msg' : 'bots';
+  var want = dft;
+  try{ want = localStorage.getItem('panel_tab') || dft; }catch(e){}
+  switchTab(want, true);
+  // 手机上登录后才提示「添加到桌面」（没登录时提示没意义）
+  showAddHome();
+  if(!window._poll){ window._poll = setInterval(refresh, 5000); }
+}
+
+// ===================== 添加到桌面 =====================
+// 手机把面板加到主屏后：点开是全屏的（没有地址栏），而且**不用重新输密码**
+// —— 密码存在 localStorage 里，同一个源，装到桌面后照样读得到。
+//
+// ★★ 为什么点一下不一定能装上（这不是 bug，是浏览器的规定）：
+//   · 安卓 Chrome：网页可以自己弹系统安装框（beforeinstallprompt）——
+//     那才是真正的「一键」。但**它要求 HTTPS**，我们是 http://IP，
+//     所以拿不到这个事件，只能教用户点浏览器菜单。
+//   · iOS：苹果**根本不开放**这个能力，任何网页都做不到一键，
+//     只能教「分享 → 添加到主屏幕」。
+//   等以后上了 HTTPS，安卓这边就会自动变成真·一键，不用改代码。
+var DEFERRED_INSTALL = null;
+
+function isStandalone(){
+  try{
+    return window.matchMedia('(display-mode: standalone)').matches
+        || window.navigator.standalone === true;
+  }catch(e){ return false; }
+}
+
+function isMobile(){
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+}
+
+// Chrome 觉得「这个站可以装了」时会发这个事件。存下来，
+// 等用户点我们的按钮时代它去弹系统框（比浏览器自己弹的时机可控）
+window.addEventListener('beforeinstallprompt', function(e){
+  e.preventDefault();
+  DEFERRED_INSTALL = e;
+});
+
+function showAddHome(){
+  var b = document.getElementById('addHome');
+  if(!b) return;
+  // 已经是从桌面图标进来的（standalone）或者不是手机 → 不用显示
+  // （措辞注意：别在这句里写那四个字，会撞上 _ui_harness.js 的回归防护）
+  if(isStandalone() || !isMobile()) return;
+  b.style.display = 'inline-block';
+}
+
+function addToHome(){
+  if(DEFERRED_INSTALL){
+    // 真·一键：调系统自己的安装框
+    DEFERRED_INSTALL.prompt();
+    DEFERRED_INSTALL = null;
+    return;
+  }
+  showHomeTip();
+}
+
+function showHomeTip(){
+  var ios = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+  var body = document.getElementById('htBody');
+  if(body){
+    body.innerHTML = ios
+      ? '① 确认现在用的是 <b>Safari</b>（微信/QQ 里点右上角 →「在浏览器打开」）<br>'
+        + '② 点屏幕底部的 <span class="ht-k">分享 ⬆️</span><br>'
+        + '③ 往下滑，找到 <span class="ht-k">添加到主屏幕</span><br>'
+        + '④ 点右上角「添加」'
+      : '① 点浏览器右上角的 <span class="ht-k">⋮ 菜单</span><br>'
+        + '② 点 <span class="ht-k">添加到主屏幕</span>'
+        + '（有的叫「安装应用」）<br>'
+        + '③ 点「添加」';
+  }
+  document.getElementById('homeTip').style.display = 'flex';
+}
+
+function closeHomeTip(){
+  document.getElementById('homeTip').style.display = 'none';
+}
+
+// 已经在「装好的」状态里打开 → 别再显示提示
+if(isStandalone()){
+  document.addEventListener('DOMContentLoaded', function(){
+    var b = document.getElementById('addHome');
+    if(b) b.style.display = 'none';
+  });
+}
+
+function logout(msg){
+  _setLS('pw', ''); _setLS('token', '');
+  PW = ''; TOK = '';
+  clearHTMLCache();       // ★ 别把上一个人的页面缓存留给下一个人
+  document.getElementById('mask').style.display='flex';
+  document.getElementById('main').style.display='none';
+  if(msg) toast(msg);
+}
+
+/* ---------- 身份：管理员 vs 商户 ---------- */
+function applyRole(me){
+  ME = me || {role:'admin'};
+  var admin = ME.role === 'admin';
+  // 管理员专属的**标签**（添加机器人 / 商户管理）
+  applyRoleTabs();
+  // ★ 商户只配商城机器人：默认就停在「🛒 商城机器人」那一类，
+  //   别停在管理员默认的「记账机器人」上（那类对商户是藏起来的）
+  var allow = typeTabs().map(function(t){ return t.v; });
+  if(allow.indexOf(CUR_TYPE) < 0) CUR_TYPE = allow[0] || 'shop';
+  var who = document.getElementById('whoami');
+  if(who){
+    who.textContent = admin ? '管理员'
+      : ('商户：' + (ME.name || ME.user || ''));
+    who.style.display = '';
+  }
+  // ★ 页面版本号（页面文件的改动时间）。
+  //   改了界面「没生效」的时候，一眼就能看出是浏览器还开着旧页面
+  var pv = document.getElementById('pagev');
+  if(pv && LAST_PAGE_V){
+    pv.textContent = '页面版本 ' + LAST_PAGE_V;
+    pv.style.display = '';
+  }
+  document.title = admin ? 'TG 机器人管理面板' : '商户后台';
+}
+
+function esc(s){
+  return String(s==null?'':s).replace(/[&<>"']/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+
+/* ★★ jsq()：往「内联事件的字符串参数」里塞值时必须用它，esc() 在这里**没用**。
+   为什么 esc() 不管用：内联属性是**先被 HTML 解码、再当 JS 解析**的 ——
+   esc("'") 产出 &#39;，浏览器解码回 '，照样把 JS 字符串闭合掉，后面就当代码跑了。
+   （2026-09-29 审计提的存储型 XSS，我核实过确实能打通：攻击者往
+     X-Forwarded-For 里塞个单引号，管理员一点那条登录记录的 IP 就执行脚本。）
+   jsq() 把危险字符转成 \uXXXX —— 产物里**既没有引号也没有尖括号**，
+   放进 HTML 属性里安全；JS 解析时又还原成原字符，显示不受影响。
+   ★ 纯文本上下文（<td>文字</td> 那种）**继续用 esc()**，别改错。 */
+function jsq(s){
+  return String(s==null?'':s).replace(/[\\'"<>&\n\r\u2028\u2029]/g, function(c){
+    return '\\u' + ('000' + c.charCodeAt(0).toString(16)).slice(-4);
+  });
+}
+
+function statusTag(b){
+  if(b.expired) return '<span class="tag err">已到期</span>';
+  // ★ 客户自建的机器人：**本面板不运行它**（跑在客户自己的服务器上），
+  //   所以 status 永远是 stopped —— 直接显示「客户自建」，
+  //   不然会挂个「已停止」的牌子，看着像坏了
+  if(b.remote) return '<span class="tag wait" title="跑在客户自己的服务器上，'
+    + '本面板不运行它。消息由它回传过来。">客户自建</span>';
+  if(!b.enabled) return '<span class="tag off">已停用</span>';
+  if(b.status==='running') return '<span class="tag ok">● 运行中</span>';
+  if(b.status==='starting') return '<span class="tag wait">启动中</span>';
+  if(b.status==='conflict') return '<span class="tag err">冲突</span>';
+  if(b.status==='error') return '<span class="tag err">出错</span>';
+  return '<span class="tag off">已停止</span>';
+}
+
+function fmtDate(ts){
+  var d=new Date(ts*1000);
+  return (d.getMonth()+1)+'/'+d.getDate()+' '+('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);
+}
+
+// 到期这一列：永久 / 剩 N 天 / 已过期（还能救几天）
+function expireCell(b){
+  if(!b.expire_at) return '<span style="color:#7d8590">永久</span>';
+  if(b.expired){
+    var left = b.delete_at ? Math.max(0, Math.ceil(b.delete_at - Date.now()/1000)) : 0;
+    var d = Math.floor(left/86400), hh = Math.floor((left%86400)/3600);
+    return '<span class="tag err">已过期</span>'
+      +'<div class="muted">'+(d>0? d+' 天 ':'')+hh+' 小时后删除</div>';
+  }
+  var days = Math.ceil(b.remain_sec/86400);
+  var color = days<=1 ? '#f85149' : (days<=3 ? '#d29922' : '#3fb950');
+  return '<span style="color:'+color+'">剩 '+days+' 天</span>'
+    +'<div class="muted">'+fmtDate(b.expire_at)+' 到期</div>';
+}
+
+/* ============ 换掉一个容器的内容（面板每几秒就刷一次，小心点） ============
+   ★★ 为什么不能直接 innerHTML = ...：
+     面板每 5 秒 refresh() 一次（消息记录那边 3 秒一次），每次都把表格
+     整个重画。**innerHTML 一重设，浏览器就把横向滚动位置归零** ——
+     手机上表现为「滑到右边去看后面的列，过几秒自己跳回最左边」
+     （用户 2026-09-29 报的）。
+
+   两道防线：
+     ① **内容一模一样就根本不动 DOM** —— 大多数刷新都是这种（数据没变），
+        既不闪、又不丢滚动位置，还省事
+     ② 真要重画时，先记下里面 .tblwrap 的 scrollLeft，画完再放回去
+        （数据确实变了的情况，比如未读数跳了一下）
+   ★ 退出登录时必须 clearHTMLCache()，不然换了个人登录可能看到上一个人的页面。 */
+var _LAST_HTML = {};
+
+function clearHTMLCache(){ _LAST_HTML = {}; }
+
+function setHTML(id, h){
+  var el = document.getElementById(id);
+  if(!el) return;
+  if(_LAST_HTML[id] === h) return;              // ① 没变就别碰
+  _LAST_HTML[id] = h;
+  var keeps = [];
+  try{                                           // ② 记下横向滚动位置
+    var ws = el.querySelectorAll ? el.querySelectorAll('.tblwrap') : [];
+    for(var i=0;i<ws.length;i++) keeps.push(ws[i].scrollLeft || 0);
+  }catch(e){}
+  el.innerHTML = h;
+  try{
+    var ws2 = el.querySelectorAll ? el.querySelectorAll('.tblwrap') : [];
+    for(var j=0;j<ws2.length;j++){ if(keeps[j]) ws2[j].scrollLeft = keeps[j]; }
+  }catch(e){}
+}
+
+function renderTable(bots, target, statLabel, extra){
+  var el=document.getElementById(target);
+  if(!bots.length){ setHTML(target, '<div class="empty">还没有添加</div>'); return; }
+  // ★ statLabel 传 null = **不要那一列**
+  //   用户 2026-09-29：记账（记账群）/ 客服（客户）/ USDT（监听地址）
+  //   这三列都去掉；只有商城还留着「待处理」
+  var h='<div class="tblwrap"><table class="ctr"><tr><th>备注</th><th>机器人</th><th>绑定码</th><th>使用者</th><th>状态</th><th>到期</th>'
+        + (statLabel ? '<th>'+statLabel+'</th>' : '')
+        + '<th>操作</th></tr>';
+  bots.forEach(function(b){
+    var ops = (b.admin_count || 0) > 1
+      ? '<div class="muted">+ '+(b.admin_count-1)+' 个操作人</div>' : '';
+    var bound = b.bound
+      ? '<span style="color:#3fb950">✅ '+esc(b.admin_name)+'</span>'
+        +'<div class="muted">ID:'+esc(b.admin_id)+'</div>'+ops
+      : '<span style="color:#d29922">⏳ 等待绑定</span>';
+    h+='<tr>'
+      +'<td><b>'+esc(b.note)+'</b><div class="muted">'+esc(b.created)+'</div></td>'
+      +'<td>@'+esc(b.username)+'<div class="muted">'+esc(b.name)+'</div></td>'
+      +'<td><span class="code" onclick="copyCode(\''+jsq(b.bind_code)+'\')" title="点击复制">'+esc(b.bind_code)+'</span></td>'
+      +'<td>'+bound+'</td>'
+      +'<td>'+statusTag(b)+(b.error?'<div class="muted" style="max-width:180px;word-break:break-all">'+esc(b.error)+'</div>':'')+'</td>'
+      +'<td>'+expireCell(b)+'</td>'
+      + (statLabel ? '<td>'+b.stat+'</td>' : '')
+      +'<td style="white-space:nowrap">'
+        // ★ 管理员的按钮只剩：续期 +（商城才有配置）+ 备注 + 删除
+        //   用户 2026-09-29 明确要求。撤掉的三个（接口都还在，只是不显示）：
+        //     · 启用 / 停用   —— 想停就删，或者等它到期
+        //     · 换绑定码      —— 绑定码列照常显示、照常能复制，只是不能再生成新的
+        //     · 🔑 Token      —— 换 token 现在只有商户后台能操作
+        + (ME.role === 'admin'
+            ? ((b.expired
+                ? '<button class="sm" onclick="openExt(\''+b.id+'\',\''+jsq(b.note)+'\')">续期恢复</button> '
+                : '<button class="gray sm" onclick="openExt(\''+b.id+'\',\''+jsq(b.note)+'\')">续期</button> ')
+              +(extra ? extra(b) : '')
+              // ★ 只有「客户自建」的才多这一个按钮 —— **一键下载填好的安装包**
+              //   （里面有编号、token、回传地址），下载完直接发给客户，
+              //   客户解压就能跑。全程不用粘任何东西。
+              +(b.remote
+                ? '<button class="gray sm" onclick="soloZip(\''+b.id+'\',\''
+                  + jsq(b.note) + '\')"'
+                  +' title="下载填好的客户安装包（解压就能跑，不用填配置）">'
+                  +'⬇️ 安装包</button> '
+                // ★ 补票按钮：添加时忘了勾「跑在客户自己的服务器上」才会出现，
+                //   点一下就补上、这按钮自己也消失（不会一直占地方）
+                : (b.type === 'ledger'
+                   ? '<button class="gray sm" onclick="setRemote(\''+b.id+'\',\''
+                     + jsq(b.note) + '\')"'
+                     +' title="这个机器人跑在客户自己的服务器上？点一下改过来'
+                     +'（本面板不再运行它，并多出一个安装包下载）">'
+                     +'☁ 客户自建</button> '
+                   : ''))
+              +'<button class="gray sm" onclick="editNote(\''+jsq(b.id)+'\')"'
+              +' title="改这个机器人的备注名（列表第一列）">备注</button> '
+              +'<button class="red sm" onclick="delBot(\''+b.id+'\',\''+jsq(b.note)+'\')">删除</button>')
+            // 商户：只能配自己的、看订单、换自己的 token
+            : ((extra ? extra(b) : '')
+               +'<button class="gray sm" onclick="openToken(\''+b.id+'\',\''+jsq(b.note)+'\')">🔑 Token</button>'))
+      +'</td></tr>';
+  });
+  setHTML(target, h+'</table></div>');
+}
+
+var DURATIONS = [];
+var GRACE = 7;
+
+var LAST_ALL = [];     // 最近一次拿到的机器人列表（消息记录那边要用）
+var LAST_PAGE_V = '';  // 页面版本号（服务端给的，判断有没有在跑旧页面）
+
+function render(data){
+  LAST_PAGE_V = data.page_v || '';
+  DURATIONS = data.durations || [];
+  GRACE = data.grace_days || 7;
+  // 首次拿到时长选项就填进下拉框
+  var sel = document.getElementById('duration');
+  if(sel && !sel.options.length){
+    DURATIONS.forEach(function(d){
+      var o=document.createElement('option');
+      o.value=d.value; o.textContent=d.label;
+      if(d.value==='forever') o.selected=true;
+      sel.appendChild(o);
+    });
+  }
+  var all = data.bots || [];
+  var kefu = all.filter(function(b){ return b.type==='kefu'; });
+  var usdt = all.filter(function(b){ return b.type==='usdt'; });
+  var shop = all.filter(function(b){ return b.type==='shop'; });
+  var ledger = all.filter(function(b){ return b.type==='ledger'; });
+  LAST_ALL = all;      // 消息记录那边要用（按类型筛能记录的机器人）
+  // ★★ 用户 2026-09-29 要求：
+  //   · 记账 / 客服 / USDT —— 统计列（记账群 / 客户 / 监听地址）和
+  //     「⚙️ 配置」按钮都撤了，操作里只剩「续期 / 备注 / 删除」
+  //     （传 null 就是不要那一列）
+  //   · 商城 —— 保留统计列「待处理」和「⚙️ 配置」
+  //   · ★ 订单只有**商户后台**能看，管理后台不给这个入口
+  renderTable(kefu, 'list-kefu', null);
+  renderTable(usdt, 'list-usdt', null);
+  renderTable(ledger, 'list-ledger', null);
+  renderTable(shop, 'list-shop', '待处理', function(b){
+    return '<button class="gray sm" onclick="openCfg(\''+b.id+'\',\''+jsq(b.note)+'\')">⚙️ 配置</button> '
+         + (ME.role === 'admin' ? '' :
+            '<button class="gray sm" onclick="openOrd(\''+b.id+'\',\''+jsq(b.note)+'\')">📋 订单'
+            + (b.stat ? ' ('+b.stat+')' : '') + '</button> ');
+  });
+  var admin = ME.role === 'admin';
+  // 类型卡片由「机器人列表」标签里的子标签控制（showType）
+  ['card-kefu', 'card-usdt', 'card-shop', 'card-ledger'].forEach(function(id){
+    var el = document.getElementById(id);
+    if(el) el.style.display = 'none';       // 先全藏，renderTypeTabs 会放行一个
+  });
+  // 商户一台都没有时别让他对着空白页发懵
+  var em = document.getElementById('merch-empty');
+  if(em) em.style.display = (!admin && !all.length) ? '' : 'none';
+
+  document.getElementById('cnt-kefu').textContent = kefu.length ? '（'+kefu.length+' 个）' : '';
+  document.getElementById('cnt-usdt').textContent = usdt.length ? '（'+usdt.length+' 个）' : '';
+  document.getElementById('cnt-shop').textContent = shop.length ? '（'+shop.length+' 个）' : '';
+  document.getElementById('cnt-ledger').textContent = ledger.length ? '（'+ledger.length+' 个）' : '';
+  // 当前在「机器人列表」标签上的话，顺手刷新子标签
+  if(CUR_TAB === 'bots') renderTypeTabs();
+}
+
+/* ---------- 商城：配置弹窗 ---------- */
+var cfgId = null, cfgProviders = [];
+
+function openCfg(id, note){
+  cfgId = id;
+  document.getElementById('cfgTitle').textContent = '⚙️ 商城配置 —— ' + note;
+  document.getElementById('cfgBody').innerHTML = '<div class="empty">加载中…</div>';
+  document.getElementById('shopCfgModal').style.display = 'flex';
+  api('/api/shop/'+id+'/config').then(function(d){
+    if(!d.ok){ document.getElementById('cfgBody').innerHTML = '<div class="empty">'+esc(d.error)+'</div>'; return; }
+    cfgProviders = d.providers || [];
+    var c = d.config || {};
+    var h = '';
+    h += '<div class="cfgrow"><label>总开关</label><select id="c_en">'
+       + '<option value="1"'+(c.enabled!==false?' selected':'')+'>开启</option>'
+       + '<option value="0"'+(c.enabled===false?' selected':'')+'>关闭</option></select></div>';
+    h += '<div class="cfgrow"><label>收款地址</label><input id="c_pay" value="'+esc(c.trx_own||'')+'" placeholder="TRX 地址，客户往这里转 TRX（必填）"></div>';
+    if(!c.trx_own){ h += '<div class="muted" style="color:#d29922;margin:-4px 0 10px 140px">没填收款地址，客户点「充能量」会提示没配置</div>'; }
+    h += '<div class="cfgrow"><label>单价(TRX)</label><input id="c_price" value="'+esc(c.price)+'"><span class="muted">一个单位多少 TRX</span></div>';
+    h += '<div class="cfgrow"><label>单位能量</label><input id="c_energy" value="'+esc(c.energy)+'"><span class="muted">一个单位发多少能量</span></div>';
+    h += '<div class="cfgrow"><label>最高倍数</label><input id="c_max" value="'+esc(c.max)+'"><span class="muted">超过只按这个倍数发，多出的要人工处理</span></div>';
+    var opts = cfgProviders.map(function(p){
+      return '<option value="'+esc(p.value)+'"'+(p.value===c.provider?' selected':'')+'>'+esc(p.label)+'</option>';
+    }).join('');
+    h += '<div class="cfgrow"><label>能量上游</label><select id="c_prov">'+opts+'</select></div>';
+    h += '<div class="cfgrow"><label>上游 API Key</label><input id="c_key" value="'+esc(c.provider_key||'')+'" placeholder="选 mock 可留空（模拟，不真发能量）"></div>';
+    h += '<div class="cfgrow"><label></label><button type="button" onclick="testProv()">测试连接 / 查余额</button>'
+       + '<span class="muted" id="c_testmsg" style="margin-left:8px"></span></div>';
+    // 选「自定义上游」时才展开这一块 —— 客户照自己上游的文档填
+    h += '<div id="c_custom" style="display:'+((c.provider==='custom')?'':'none')+'">'
+       + '<div class="cfgrow"><label>接口地址</label>'
+       + '<input id="cu_url" value="'+esc(c.custom_url||'')+'" '
+       + 'placeholder="https://你的上游/buy?key={key}&amp;addr={addr}&amp;energy={energy}&amp;hour={hours}"></div>'
+       + '<div class="muted" style="margin:-4px 0 10px 140px;line-height:1.7">'
+       + '  把你自己上游文档里的接口照抄进来，参数值用占位符：<br>'
+       + '  <code>{key}</code> 你的 API Key　<code>{addr}</code> 收能量地址　'
+       + '<code>{energy}</code> 能量数　<code>{hours}</code> 小时数<br>'
+       + '  参数名按文档里的写（比如文档叫 <code>api_key</code> 就写 '
+       + '<code>api_key={key}</code>）'
+       + '</div>'
+       + '<div class="cfgrow"><label>请求方式</label><select id="cu_method">'
+       + '<option value="GET"'+((c.custom_method||'GET')==='GET'?' selected':'')+'>GET</option>'
+       + '<option value="POST"'+(c.custom_method==='POST'?' selected':'')+'>POST</option></select>'
+       + '<span class="muted">POST 时占位符还是写在地址里（参数拼在 URL 上）</span></div>'
+       + '<div class="cfgrow"><label>怎么算成功</label>'
+       + '<span class="muted">返回的</span>'
+       + '<input id="cu_okp" value="'+esc(c.custom_ok_path||'code')+'" style="width:150px" placeholder="code">'
+       + '<span class="muted">等于</span>'
+       + '<input id="cu_okv" value="'+esc(c.custom_ok_value||'200')+'" style="width:90px" placeholder="200">'
+       + '<span class="muted">就算下单成功</span></div>'
+       + '<div class="cfgrow"><label>订单号位置</label>'
+       + '<input id="cu_oid" value="'+esc(c.custom_order_path||'data.orderId')+'" placeholder="data.orderId">'
+       + '<span class="muted">订单号在返回 JSON 里的路径</span></div>'
+       + '<div class="muted" style="margin:6px 0 10px 140px">'
+       + '⚠️ 自定义上游查不了余额，「每单成本」要等第一笔发货后看日志里的实测扣费'
+       + '</div></div>';
+    var ap = c.auto_prices || {};
+    var apTxt = Object.keys(ap).sort(function(a,b){return a-b;})
+                  .map(function(k){ return k + ' ' + ap[k]; }).join('\n');
+    h += '<div class="cfgrow"><label>笔数套餐</label><select id="c_aen">'
+       + '<option value="1"'+(c.auto_enabled?' selected':'')+'>开启</option>'
+       + '<option value="0"'+(c.auto_enabled?'':' selected')+'>关闭</option></select>'
+       + '<span class="muted">买 N 笔，用一次扣一次（智能笔数：65k 算 1 笔，131k 算 2 笔）</span></div>';
+    // ★★ 「标签 + 文本框 + 一大段说明」横着排是放不下的（弹窗宽度有限），
+    //    说明会把框挤得只剩一条缝 —— 用户看到的就是「只有一根细滚动条，
+    //    没有填价格的地方」。所以用 `.l_cfgrow`：标签在左，
+    //    框和说明在右边一列里**竖着**放。
+    h += '<div class="l_cfgrow"><label>笔数档位</label>'
+       + '<div class="col">'
+       + '<textarea id="c_ap" rows="5" spellcheck="false" '
+       + 'placeholder="10 30&#10;50 140&#10;100 260&#10;300 750">'
+       + esc(apTxt) + '</textarea>'
+       + '<span class="muted">每行一档，写「笔数 价格TRX」<br>'
+       + '上游只要 ≥2 笔都行，没上限 —— 你上游有 300 笔就写 300<br>'
+       + '成本价要去 @XXTrxBot 查</span>'
+       + '</div></div>';
+    var pp = c.premium_prices || {};
+    var pk = (c.premium_key||'').trim();
+    h += '<div class="cfgrow"><label>会员功能</label><select id="c_pen">'
+       + '<option value="1"'+(c.premium_enabled?' selected':'')+'>开启</option>'
+       + '<option value="0"'+(c.premium_enabled?'':' selected')+'>关闭</option></select>'
+       + '<span class="muted">客户自助开 TG Premium</span></div>';
+    h += '<div class="cfgrow"><label>会员Key</label><input id="c_pkey" value="'+esc(c.premium_key||'')+'" placeholder="@GiftAPIBot 的 key（留空则和能量共用）"></div>';
+    h += '<div class="cfgrow"><label></label><span class="muted">'
+       + (pk ? '当前：<b style="color:#3fb950">USDT 计价</b>（走 gift 域名，独立账户，要预存 USDT）。<b>客户也付 USDT-TRC20</b> —— 同一个收款地址就能收，不用换汇。'
+             : '当前：<b>TRX 计价</b>（和能量共用余额，去 @XXTrxBot 开「会员API权限」）。客户付 TRX。')
+       + '</span></div>';
+    var _u = pk ? 'USDT' : 'TRX';
+    h += '<div class="cfgrow"><label>3个月('+_u+')</label><input id="c_p3" value="'+esc(pp['3']||0)+'"><span class="muted">上游成本 12.5 USDT</span></div>';
+    h += '<div class="cfgrow"><label>6个月('+_u+')</label><input id="c_p6" value="'+esc(pp['6']||0)+'"><span class="muted">上游成本 16.5 USDT</span></div>';
+    h += '<div class="cfgrow"><label>12个月('+_u+')</label><input id="c_p12" value="'+esc(pp['12']||0)+'"><span class="muted">上游成本 29.5 USDT</span></div>';
+    h += '<div class="cfgrow"><label>通知群ID</label><input id="c_group" value="'+esc(c.group_ids||'')+'" placeholder="可选，订单实时推到群，多个用逗号隔开"></div>';
+    h += '<div class="cfgrow"><label>客服联系方式</label><input id="c_contact" value="'+esc(c.contact||'')+'" placeholder="可选，如 @yourkefu"></div>';
+    h += '<div class="cfgrow"><label>顶部说明</label><input id="c_notice" value="'+esc(c.notice||'')+'" placeholder="可选，显示在充能量页面顶部"></div>';
+    h += '<div class="muted" style="margin-top:10px">'
+       + '★ 客户从自己钱包转 TRX 到收款地址，系统自动把能量发给<b>转账的那个地址</b>，不需要客户登记。'
+       + '</div>';
+    document.getElementById('cfgBody').innerHTML = h;
+    // 上游选到「自定义」时，才把那几个框展开
+    var pv = document.getElementById('c_prov');
+    if(pv) pv.onchange = function(){
+      var box = document.getElementById('c_custom');
+      if(box) box.style.display = (pv.value === 'custom') ? '' : 'none';
+    };
+  }).catch(function(){});
+}
+
+function closeCfg(){
+  cfgId = null;
+  document.getElementById('shopCfgModal').style.display = 'none';
+}
+
+/* ---------- 群消息记录（★ 管理端专属，商户端连按钮都不给）----------
+   开/关记录的按钮放在每种机器人**自己的那一行**上，不再单开一张卡片 ——
+   看记录统一去 /messages 那个独立页面（那页能切机器人）。
+   白名单三处必须一致：core.ARCHIVE_TYPES / 这里 / messages_page.html */
+var ARCHIVE_TYPES = ['ledger'];
+
+/* ---------- 记账：配置弹窗 ---------- */
+var ledId = null, ledDefault = '';
+
+/* 记账配置弹窗（欢迎语 / 总开关）。
+   ⚠️ 用户 2026-09-29 把「⚙️ 配置」按钮从记账机器人的操作列撤了，
+   所以现在**没有入口**。弹窗和 /api/ledger/* 接口都留着，
+   想加回来只要在 renderTable 的 ledger 那行把 extra 加回去。 */
+function openLed(id, note){
+  ledId = id;
+  document.getElementById('ledTitle').textContent = '📒 记账配置 —— ' + note;
+  document.getElementById('ledBody').innerHTML = '<div class="empty">加载中…</div>';
+  document.getElementById('ledgerCfgModal').style.display = 'flex';
+  api('/api/ledger/'+id+'/config').then(function(d){
+    if(!d.ok){
+      document.getElementById('ledBody').innerHTML = '<div class="empty">'+esc(d.error)+'</div>';
+      return;
+    }
+    var c = d.config || {};
+    ledDefault = d.welcome_default || '';
+    var h = '';
+    h += '<div class="cfgrow"><label>总开关</label><select id="l_en">'
+       + '<option value="1"'+(c.enabled!==false?' selected':'')+'>开启</option>'
+       + '<option value="0"'+(c.enabled===false?' selected':'')+'>关闭</option></select>'
+       + '<span class="muted">关了机器人就不回消息</span></div>';
+    h += '<div class="cfgrow" style="align-items:flex-start"><label>入群欢迎语</label>'
+       + '<textarea id="l_wel" rows="8" style="flex:1" placeholder="留空 = 用默认欢迎语">'
+       + esc(c.welcome_text||'') + '</textarea></div>';
+    h += '<div class="muted" style="margin:-4px 0 10px 140px">'
+       + '机器人被拉进群时发的第一句话。留空用默认的那段。'
+       + '<a href="#" onclick="document.getElementById(\'l_wel\').value=ledDefault;return false">填入默认</a></div>';
+    h += '<div class="muted" style="margin:12px 0 0 0;padding:10px;background:#0d1117;border-radius:8px;line-height:1.7">'
+       + '<b>群里怎么用</b>（这些是<b>在群里发命令</b>设的，不在这儿配）：<br>'
+       + '<code>开启</code> / <code>关闭记账</code> · 记账总开关<br>'
+       + '<code>汇率 7.2</code> · <code>设置费率 10</code> · <code>日切3</code> · <code>查看费率</code><br>'
+       + '<code>添加操作员</code>（回复某人的消息）· <code>操作员</code> 看列表<br>'
+       + '<code>通知所有人 内容</code> · <code>/del</code> 清理消息 · <code>群成员</code><br>'
+       + '私聊机器人：<code>广播</code> 给多个群发通知 · <code>/del</code> 批量清理</div>';
+    document.getElementById('ledBody').innerHTML = h;
+  }).catch(function(){
+    document.getElementById('ledBody').innerHTML = '<div class="empty">加载失败</div>';
+  });
+}
+
+function closeLed(){
+  ledId = null;
+  document.getElementById('ledgerCfgModal').style.display = 'none';
+}
+
+function saveLed(){
+  if(!ledId) return;
+  var body = {
+    enabled: document.getElementById('l_en').value === '1',
+    welcome_text: document.getElementById('l_wel').value
+  };
+  api('/api/ledger/'+ledId+'/config',
+      {method:'POST', body:JSON.stringify(body)})
+  .then(function(d){
+    if(!d.ok){ toast(d.error || '保存失败'); return; }
+    toast('配置已保存');
+    closeLed();
+    refresh();
+  }).catch(function(){ toast('保存失败'); });
+}
+
+function testProv(){
+  if(!cfgId) return;
+  var msg = document.getElementById('c_testmsg');
+  msg.style.color = '';
+  msg.textContent = '测试中…';
+  // 用输入框里的值测，不用已保存的 —— 改完 key 可以先测再存
+  var body = {
+    provider: document.getElementById('c_prov').value,
+    provider_key: document.getElementById('c_key').value.trim(),
+    custom_url: (document.getElementById('cu_url')||{}).value
+                ? document.getElementById('cu_url').value.trim() : '',
+    custom_method: (document.getElementById('cu_method')||{}).value || 'GET',
+    custom_ok_path: (document.getElementById('cu_okp')||{}).value || 'code',
+    custom_ok_value: (document.getElementById('cu_okv')||{}).value || '200',
+    custom_order_path: (document.getElementById('cu_oid')||{}).value
+                       || 'data.orderId'
+  };
+  api('/api/shop/'+cfgId+'/providertest', {method:'POST', body:JSON.stringify(body)})
+    .then(function(d){
+      if(!d.ok){ msg.style.color = '#f85149'; msg.textContent = d.error||'测试失败'; return; }
+      msg.style.color = d.pass ? '#3fb950' : '#f85149';
+      msg.textContent = (d.pass?'✅ ':'❌ ') + d.msg;
+    }).catch(function(){ msg.style.color = '#f85149'; msg.textContent = '请求失败'; });
+}
+
+function saveCfg(){
+  if(!cfgId) return;
+  var id = cfgId;
+  var patch = {
+    enabled: document.getElementById('c_en').value==='1',
+    trx_own: document.getElementById('c_pay').value.trim(),
+    price: parseFloat(document.getElementById('c_price').value)||0,
+    energy: parseInt(document.getElementById('c_energy').value)||0,
+    max: parseInt(document.getElementById('c_max').value)||0,
+    provider: document.getElementById('c_prov').value,
+    provider_key: document.getElementById('c_key').value.trim(),
+    // 自定义上游那几个框（没选自定义时也存着，切回去不用重填）
+    custom_url: (document.getElementById('cu_url')||{}).value
+                ? document.getElementById('cu_url').value.trim() : '',
+    custom_method: (document.getElementById('cu_method')||{}).value || 'GET',
+    custom_ok_path: (document.getElementById('cu_okp')||{}).value
+                    ? document.getElementById('cu_okp').value.trim() : 'code',
+    custom_ok_value: (document.getElementById('cu_okv')||{}).value
+                     ? document.getElementById('cu_okv').value.trim() : '200',
+    custom_order_path: (document.getElementById('cu_oid')||{}).value
+                       ? document.getElementById('cu_oid').value.trim()
+                       : 'data.orderId',
+    auto_enabled: document.getElementById('c_aen').value==='1',
+    // 档位从文本框里现解析：每行「笔数 价格」
+    auto_prices: (function(){
+      var o = {}, t = document.getElementById('c_ap').value || '';
+      t.split('\n').forEach(function(line){
+        var m = line.trim().split(/\s+/);
+        if(m.length >= 2){
+          var c = parseInt(m[0], 10), p = parseFloat(m[1]);
+          if(c >= 2 && p > 0) o[String(c)] = p;
+        }
+      });
+      return o;
+    })(),
+    premium_enabled: document.getElementById('c_pen').value==='1',
+    premium_key: document.getElementById('c_pkey').value.trim(),
+    premium_prices: {
+      '3': parseFloat(document.getElementById('c_p3').value)||0,
+      '6': parseFloat(document.getElementById('c_p6').value)||0,
+      '12': parseFloat(document.getElementById('c_p12').value)||0
+    },
+    group_ids: document.getElementById('c_group').value.trim(),
+    contact: document.getElementById('c_contact').value.trim(),
+    notice: document.getElementById('c_notice').value.trim()
+  };
+  api('/api/shop/'+id+'/config', {method:'POST', body:JSON.stringify(patch)})
+    .then(function(d){
+      if(d.ok){
+        toast(d.baseline_reset ? '已保存（收款地址变了，扫描基线已重置）' : '配置已保存');
+        closeCfg(); refresh();
+      } else toast('保存失败：'+d.error);
+    }).catch(function(){});
+}
+
+/* ---------- 商城：流水弹窗 ---------- */
+var ordId = null;
+
+function openOrd(id, note){
+  ordId = id;
+  document.getElementById('ordTitle').textContent = '📋 收款流水 —— ' + note;
+  document.getElementById('ordBody').innerHTML = '<div class="empty">加载中…</div>';
+  document.getElementById('orderModal').style.display = 'flex';
+  loadOrd();
+}
+
+function closeOrd(){
+  ordId = null;
+  document.getElementById('orderModal').style.display = 'none';
+}
+
+function loadOrd(){
+  if(!ordId) return;
+  api('/api/shop/'+ordId+'/payments').then(function(d){
+    if(!d.ok){ document.getElementById('ordBody').innerHTML='<div class="empty">'+esc(d.error)+'</div>'; return; }
+    var t = d.today || {};
+    var sc = d.scan || {};
+    var sub = '今日 '+t.count+' 笔 / '+t.trx+' TRX / '+t.energy+' 能量'
+            + '　待处理 '+d.attention+' 笔';
+    if(sc.pay_address){
+      sub += '　扫描基线：' + (sc.baseline ? '已建立' : '未建立');
+    }
+    document.getElementById('ordSub').textContent = sub;
+    var ps = d.payments || [];
+    if(!ps.length){ document.getElementById('ordBody').innerHTML='<div class="empty">还没有流水</div>'; return; }
+    var h = '<div class="tblwrap"><table class="ordtbl"><tr><th>时间</th><th>来自地址</th><th>收到</th><th>倍数</th><th>发放能量</th><th>状态</th><th>操作</th></tr>';
+    ps.forEach(function(p){
+      var col = {done:'#3fb950', pending:'#d29922', skipped:'#7d8590'}[p.status] || '#f85149';
+      var acts = '';
+      if(p.status==='failed' || p.status==='pending'){
+        acts += '<button class="sm" onclick="payAct(\''+jsq(p.txid)+'\',\'retry\')">重发</button> ';
+        acts += '<button class="gray sm" onclick="payAct(\''+jsq(p.txid)+'\',\'mark\')">忽略</button>';
+      }
+      acts += '<span class="muted" title="'+esc(p.txid)+'">tx:'+esc((p.txid||'').slice(0,8))+'…</span>';
+      h += '<tr>'
+         + '<td class="muted">'+esc(p.at_str)+'</td>'
+         + '<td><code style="font-size:11.5px">'+esc(p.from)+'</code></td>'
+         + '<td>'+esc(p.amount)+' TRX</td>'
+         + '<td>'+esc(p.units)+'</td>'
+         + '<td>'+esc(p.energy)+'</td>'
+         + '<td><span style="color:'+col+'">'+esc(p.status_label)+'</span>'
+           + (p.note ? '<div class="muted" style="max-width:220px;word-break:break-all">'+esc(p.note)+'</div>' : '')
+           + '</td>'
+         + '<td style="white-space:nowrap">'+acts+'</td></tr>';
+    });
+    document.getElementById('ordBody').innerHTML = h + '</table></div>';
+  }).catch(function(){});
+}
+
+function payAct(txid, action){
+  if(!ordId) return;
+  if(action==='retry' && !confirm('重新给这个地址发一次能量？\n（如果上游其实已经接过单，会重复发，请确认）')) return;
+  api('/api/shop/'+ordId+'/payment/'+txid+'/'+action, {method:'POST'})
+    .then(function(d){
+      if(d.ok){ toast('已处理'); loadOrd(); refresh(); }
+      else toast('失败：'+d.error);
+    }).catch(function(){});
+}
+
+/* ---------- 续期弹窗 ---------- */
+var extId = null;
+
+function openExt(id, note){
+  extId = id;
+  document.getElementById('extTitle').textContent = '给「'+note+'」续期';
+  var box = document.getElementById('extOpts');
+  box.innerHTML = '';
+  DURATIONS.forEach(function(d){
+    var b = document.createElement('button');
+    b.textContent = d.label;
+    b.onclick = function(){ doExtend(d.value, d.label); };
+    box.appendChild(b);
+  });
+  document.getElementById('extModal').style.display = 'flex';
+}
+
+function closeExt(){
+  extId = null;
+  document.getElementById('extModal').style.display = 'none';
+}
+
+function doExtend(dur, label){
+  if(!extId) return;
+  var id = extId;
+  closeExt();
+  api('/api/bots/'+id+'/extend', {method:'POST', body:JSON.stringify({duration:dur})})
+    .then(function(d){
+      if(d.ok){ toast('已续期：'+label); refresh(); }
+      else toast('失败：'+d.error);
+    }).catch(function(){});
+}
+
+function refresh(){
+  api('/api/bots').then(function(d){
+    if(!d || !d.ok) return;
+    applyRole(d.me);
+    render(d);
+    if(ME.role==='admin') loadMerch();
+  }).catch(function(){});
+}
+
+/* ---------- 改密码 ---------- */
+var cpForce = false;
+
+function openChpass(force){
+  cpForce = !!force;
+  document.getElementById('cpCancel').style.display = force ? 'none' : '';
+  document.getElementById('chpassHint').textContent = force
+    ? '这是初始密码，为了安全请先改成自己的' : '修改你的登录密码';
+  document.getElementById('chpassModal').style.display = 'flex';
+}
+
+function closeChpass(){
+  if(cpForce){ toast('必须先改密码才能用'); return; }
+  document.getElementById('chpassModal').style.display = 'none';
+}
+
+function doChpass(){
+  var o = document.getElementById('cp_old').value;
+  var n = document.getElementById('cp_new').value;
+  var n2 = document.getElementById('cp_new2').value;
+  if(!n || n !== n2){ toast('两次输入的新密码不一样'); return; }
+  api('/api/me/password', {method:'POST', body:JSON.stringify({old:o, new:n})})
+    .then(function(d){
+      if(!d || !d.ok){ toast((d&&d.error)||'改不了'); return; }
+      if(d.token){ TOK = d.token; _setLS('token', TOK); }
+      cpForce = false;
+      document.getElementById('chpassModal').style.display = 'none';
+      toast('密码已修改');
+      refresh();
+    }).catch(function(){});
+}
+
+/* ---------- 换机器人 Token ---------- */
+var tkId = null;
+
+function openToken(id, note){
+  tkId = id;
+  document.getElementById('tkTitle').textContent = '🔑 换 Token —— ' + note;
+  document.getElementById('tk_val').value = '';
+  document.getElementById('tokenModal').style.display = 'flex';
+  api('/api/bots/'+id+'/token').then(function(d){
+    if(d && d.ok) document.getElementById('tk_val').value = d.token || '';
+  }).catch(function(){});
+}
+
+function closeToken(){
+  tkId = null;
+  document.getElementById('tokenModal').style.display = 'none';
+}
+
+function saveToken(){
+  var v = document.getElementById('tk_val').value.trim();
+  if(!v){ toast('请填 token'); return; }
+  api('/api/bots/'+tkId+'/token', {method:'POST', body:JSON.stringify({token:v})})
+    .then(function(d){
+      if(!d || !d.ok){ toast((d&&d.error)||'换不了'); return; }
+      toast('已换好，记得让使用者重新发绑定码');
+      closeToken(); refresh();
+    }).catch(function(){});
+}
+
+/* ---------- 商户管理 ---------- */
+function addMerch(){
+  var name = document.getElementById('m_name').value.trim();
+  var user = document.getElementById('m_user').value.trim();
+  if(!user){ toast('请填登录账号'); return; }
+  api('/api/merchants', {method:'POST', body:JSON.stringify({name:name, user:user})})
+    .then(function(d){
+      if(!d || !d.ok){ toast((d&&d.error)||'建不了'); return; }
+      var m = d.merchant || {};
+      document.getElementById('merch-new').innerHTML =
+        '<div style="background:#0d1117;border:1px solid #3fb950;border-radius:6px;padding:10px">'
+        + '<b style="color:#3fb950">✅ 商户建好了，把下面这些发给客户（密码只显示这一次）</b>'
+        + '<div style="margin-top:6px">登录网址：<code>'+esc(location.origin)+'/m</code></div>'
+        + '<div>账号：<code>'+esc(m.user)+'</code></div>'
+        + '<div>初始密码：<code style="font-size:15px">'+esc(d.pass)+'</code></div>'
+        + '<div class="muted" style="margin-top:6px">他第一次登录会被要求改密码</div>'
+        + '<button class="gray sm" style="margin-top:8px" onclick="copyTut(\''
+        + esc('网址：'+location.origin+'/m\n账号：'+m.user+'\n初始密码：'+d.pass
+              +'\n登录后请先改密码')+'\')">📋 复制这段发给客户</button>'
+        + '</div>';
+      document.getElementById('m_name').value = '';
+      document.getElementById('m_user').value = '';
+      loadMerch();
+    }).catch(function(){});
+}
+
+function loadMerch(){
+  api('/api/merchants').then(function(d){
+    if(!d || !d.ok) return;
+    renderMerch(d.merchants || []);
+  }).catch(function(){});
+}
+
+function renderMerch(rows){
+  var el = document.getElementById('list-merch');
+  if(!el) return;
+  document.getElementById('cnt-merch').textContent =
+    rows.length ? '（'+rows.length+' 个）' : '';
+  if(!rows.length){ el.innerHTML = '<div class="empty">还没有商户</div>'; return; }
+  var h = '<div class="tblwrap"><table><tr><th>客户</th><th>登录账号</th><th>机器人</th>'
+        + '<th>状态</th><th>最后登录</th><th>操作</th></tr>';
+  rows.forEach(function(m){
+    h += '<tr>'
+      + '<td><b>'+esc(m.name)+'</b><div class="muted">'+esc(m.created)+'</div></td>'
+      + '<td><code>'+esc(m.user)+'</code></td>'
+      + '<td>'+(m.bot_count||0)+' 台</td>'
+      + '<td>'+(m.enabled
+          ? '<span class="tag ok">● 正常</span>'
+          : '<span class="tag off">已停用</span>')
+        + (m.must_change ? '<div class="muted">还没改初始密码</div>' : '')+'</td>'
+      + '<td class="muted">'+esc(m.last_login||'—')+'</td>'
+      + '<td style="white-space:nowrap">'
+        + '<button class="gray sm" onclick="openAssign(\''+m.mid+'\',\''+jsq(m.name)+'\')">分配机器人</button> '
+        + '<button class="gray sm" onclick="actMerch(\''+jsq(m.mid)+'\',\'reset\')">重置密码</button> '
+        + (m.enabled
+            ? '<button class="gray sm" onclick="actMerch(\''+jsq(m.mid)+'\',\'disable\')">停用</button> '
+            : '<button class="sm" onclick="actMerch(\''+jsq(m.mid)+'\',\'enable\')">启用</button> ')
+        + '<button class="red sm" onclick="delMerch(\''+m.mid+'\',\''+jsq(m.name)+'\')">删除</button>'
+      + '</td></tr>';
+  });
+  el.innerHTML = h + '</table></div>';
+}
+
+function actMerch(mid, op){
+  api('/api/merchants/'+mid+'/'+op, {method:'POST'}).then(function(d){
+    if(!d || !d.ok){ toast((d&&d.error)||'操作失败'); return; }
+    if(op==='reset' && d.pass){
+      document.getElementById('merch-new').innerHTML =
+        '<div style="background:#0d1117;border:1px solid #d29922;border-radius:6px;padding:10px">'
+        + '<b style="color:#d29922">新密码（只显示这一次）</b>'
+        + '<div>账号：<code>'+esc(d.user||'')+'</code> '
+        + '密码：<code style="font-size:15px">'+esc(d.pass)+'</code></div></div>';
+      toast('密码已重置，记得发给他');
+    } else {
+      toast(op==='disable' ? '已停用' : '已启用');
+    }
+    loadMerch();
+  }).catch(function(){});
+}
+
+function delMerch(mid, name){
+  if(!confirm('确定删除商户「'+name+'」？\n（他名下的机器人要先收回来才能删）')) return;
+  api('/api/merchants/'+mid+'/delete', {method:'POST'}).then(function(d){
+    if(!d || !d.ok){ toast((d&&d.error)||'删不掉'); return; }
+    toast('已删除'); loadMerch();
+  }).catch(function(){});
+}
+
+/* ---------- 分配机器人 ---------- */
+var asMid = null, AS_SECRETS = {};
+
+function openAssign(mid, name){
+  asMid = mid;
+  document.getElementById('asTitle').textContent = '分配机器人给 ' + name;
+  document.getElementById('assignModal').style.display = 'flex';
+  document.getElementById('asBody').innerHTML = '<div class="empty">加载中…</div>';
+  api('/api/bots').then(function(d){
+    if(!d || !d.ok){ document.getElementById('asBody').innerHTML =
+      '<div class="empty">读不到机器人列表</div>'; return; }
+    var h = '<div class="tblwrap"><table><tr><th>选</th><th>备注</th><th>机器人</th>'
+          + '<th>现在归属</th><th>带你的配置?</th></tr>';
+    AS_SECRETS = {};
+    (d.bots||[]).forEach(function(b){
+      AS_SECRETS[b.id] = !!b.has_secrets;
+      h += '<tr>'
+        + '<td><input type="checkbox" class="as-chk" value="'+esc(b.id)+'"'
+          + (((b.mid||'')===mid) ? ' checked' : '') + '></td>'
+        + '<td>'+esc(b.note)+'</td>'
+        + '<td class="muted">@'+esc(b.username)+'</td>'
+        + '<td class="muted">'+((b.mid||'')===mid ? '这个商户'
+            : (b.mid ? '别的商户' : '管理员'))+'</td>'
+        + '<td>'+(b.has_secrets
+            ? '<span style="color:#d29922">⚠️ 有</span>'
+            : '<span class="muted">空</span>')+'</td>'
+        + '</tr>';
+    });
+    document.getElementById('asBody').innerHTML = h + '</table></div>';
+  }).catch(function(){});
+}
+
+function closeAssign(){
+  asMid = null;
+  document.getElementById('assignModal').style.display = 'none';
+}
+
+function doAssign(){
+  var bids = [], sec = 0;
+  document.querySelectorAll('.as-chk').forEach(function(c){
+    if(c.checked){
+      bids.push(c.value);
+      if(AS_SECRETS[c.value]) sec++;
+    }
+  });
+  // ★ 会清掉配置就得先说清楚 —— 这个操作是不可逆的
+  if(sec && !confirm(
+      '注意：勾选的里面有 ' + sec + ' 台带着你的配置（收款地址 / 上游 Key / 通知群）。\n\n'
+    + '确定分配的话，这几台的配置会被【自动清空】——\n'
+    + '免得客户一进后台就看见你的收款地址和 API Key。\n\n'
+    + '清掉之后要客户自己重新填，你这边也得重填一遍。\n\n'
+    + '确定继续？')) return;
+  api('/api/merchants/'+asMid+'/bots',
+      {method:'POST', body:JSON.stringify({bids:bids, clear_secrets:true})})
+    .then(function(d){
+      if(!d || !d.ok){ toast((d&&d.error)||'分配失败'); return; }
+      var msg = '划过去 ' + (d.moved||0) + ' 台，收回 ' + (d.taken||0) + ' 台';
+      if(d.cleared) msg += '，清空了 ' + d.cleared + ' 台的收款地址和 Key';
+      toast(msg);
+      closeAssign(); refresh();
+    }).catch(function(){});
+}
+
+function addBot(){
+  var note=document.getElementById('note').value.trim();
+  var token=document.getElementById('token').value.trim();
+  var type=document.getElementById('type').value;
+  var duration=document.getElementById('duration').value || 'forever';
+  var remote=!!(document.getElementById('remote') || {}).checked;
+  if(!token){ toast('请填写 token'); return; }
+  toast('正在验证 token…');
+  api('/api/bots', {method:'POST', body:JSON.stringify(
+      {note:note, token:token, type:type, duration:duration, remote:remote})})
+    .then(function(d){
+      if(d.ok){
+        document.getElementById('note').value='';
+        document.getElementById('token').value='';
+        if(document.getElementById('remote'))
+          document.getElementById('remote').checked=false;
+        toast(remote ? '添加成功（客户自建，本面板不运行它）'
+                     : '添加成功，绑定码已生成');
+        refresh();
+      } else toast('失败：'+d.error);
+    }).catch(function(){});
+}
+
+/* 通用的「对机器人做个动作」。
+   ⚠️ 用户 2026-09-29 把「启用 / 停用 / 换绑定码」的按钮从机器人列表撤了
+   （他说操作里只留 续期 / 备注 / 删除），所以现在**没有按钮调用它**。
+   函数和接口都留着 —— 想加回来，把按钮加回 renderTable 的操作列就行。 */
+function act(id, action){
+  if(action==='newcode' && !confirm('换绑定码会解除当前使用者的绑定，确定吗？')) return;
+  api('/api/bots/'+id+'/'+action, {method:'POST'})
+    .then(function(){ toast('已处理'); refresh(); }).catch(function(){});
+}
+
+function delBot(id, note){
+  if(!confirm('确定删除「'+note+'」吗？删除后该机器人立即停止，数据一并清除。')) return;
+  api('/api/bots/'+id+'/delete', {method:'POST'})
+    .then(function(){ toast('已删除'); refresh(); }).catch(function(){});
+}
+
+/* ★★ 复制到剪贴板 —— **不能**直接调 navigator.clipboard.writeText
+ *
+ *   那个 API **只在「安全上下文」里存在**（HTTPS，或者 localhost）。
+ *     · 本地 http://127.0.0.1:8080  → 算安全上下文，能用（所以一直没暴露）
+ *     · 服务器 http://外网IP:8080    → navigator.clipboard 是 **undefined**
+ *
+ *   这时候 `navigator.clipboard.writeText(...)` 会**同步抛 TypeError**，
+ *   连后面的 .catch() 都挂不上 —— 表现是「什么都没复制，
+ *   剪贴板里还留着上一次的内容」。用户以为复制成功了，
+ *   粘出来发给客户的却是**上一步粘进去的 token** —— 等于把机器人送人。
+ *   这是部署到服务器之后才炸出来的真事故，本地永远复现不了。
+ *
+ *   所以：能用新 API 就用；没有、或者被拒，就退回 execCommand（HTTP 下也能用），
+ *   而且**不管成不成都必须给提示**，绝不让用户误以为复制成功了。
+ */
+function copyText(text, okMsg){
+  function oldWay(){
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.top = '-1000px';
+    document.body.appendChild(ta);
+    var ok = false;
+    try {
+      ta.select();
+      ta.setSelectionRange(0, text.length);
+      ok = document.execCommand('copy');
+    } catch(e){ ok = false; }
+    document.body.removeChild(ta);
+    if(ok){
+      toast(okMsg);
+    }else{
+      // ★ 复制不了就把内容摆出来让用户手动选 —— 绝不静默失败
+      toast('复制失败！请手动选中这段复制：' + text);
+    }
+    return ok;
+  }
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    return navigator.clipboard.writeText(text).then(function(){
+      toast(okMsg);
+    }).catch(oldWay);       // 有 API 但被拒（没给权限等）也退回去
+  }
+  return oldWay();
+}
+
+function copyCode(code){
+  copyText('/admin '+code, '已复制：/admin '+code+'   直接发给对方即可');
+}
+
+function copyTut(txt){
+  copyText(txt, '已复制，直接粘贴发给对方即可');
+}
+
+/* 把一段 HTML 转成「适合粘到微信/Telegram」的纯文本。
+   ★ 关键是把 <br> 换成真换行 —— 直接 textContent 的话，
+     说明里所有换行会挤成一整行，发出去没法看。 */
+function htmlToPlain(html){
+  return String(html == null ? '' : html)
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(div|p|li|h[1-6]|pre|details|summary|tr)>/gi, '\n')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&')          // ★ 必须放最后（别的实体里含 &）
+    .replace(/[ \t]+\n/g, '\n')       // 行尾空格
+    .replace(/\n{3,}/g, '\n\n')       // 三个以上空行压成两个
+    .trim();
+}
+
+/* 复制某一段使用说明（每节标题旁边那个「📋 复制」按钮）
+   ★ 正文是从页面上现抠的，不是另写一份 —— 另写一份的话，
+     哪天改了页面忘了改文案，复制的和屏幕上的就对不上了。 */
+function copyHelp(el){
+  var card = (el && el.closest) ? el.closest('details') : null;
+  if(!card){ toast('复制失败：找不到这一节'); return; }
+  var sum = card.querySelector('summary');
+  var body = card.querySelector('.helpbody');
+  var title = sum ? htmlToPlain(sum.innerHTML) : '';
+  var text = body ? htmlToPlain(body.innerHTML) : '';
+  copyText(title + (text ? '\n\n' + text : ''),
+           '已复制「' + title + '」整节说明，直接粘贴发给对方');
+}
+
+document.getElementById('type').addEventListener('change', function(){
+  var h=document.getElementById('typeHint');
+  var t=this.value;
+  if(t==='usdt'){
+    h.textContent='USDT 助手：绑定后可以查 TRC20 地址交易、监听地址进出账';
+  } else if(t==='shop'){
+    h.textContent='商城机器人：面向公众的自助服务，添加后记得点「⚙️ 配置」填收款地址';
+  } else {
+    h.textContent='添加后系统会自动验证 token，并生成一个绑定码';
+  }
+});
+
+/* ============ 新手教程（可复制发给朋友） ============ */
+var TUT_MAKE = `【怎么创建 Telegram 机器人并拿到 token】
+
+第 1 步　找到 @BotFather
+打开 Telegram，在最上面的搜索框输入：@BotFather
+认准带蓝色认证勾的那个（名字就叫 BotFather，头像是个机器人图标）
+点进去，点底部的「START / 开始」
+
+第 2 步　发送创建指令
+在对话框里发送这一条：/newbot
+
+第 3 步　给机器人起个名字
+它会问你：Alright, a new bot. How are we going to call it?
+（意思是：给机器人起个名字）
+你随便起一个，比如：客服助手
+中文也行，这个名字是给别人看的
+
+第 4 步　给机器人起个用户名
+它接着问：Good. Now let's choose a username for your bot.
+（意思是：给机器人起一个用户名）
+要输入一个以 bot 结尾的英文，比如：mykefu2026_bot
+如果提示已被占用，换一个再试
+
+第 5 步　复制 token 发给我
+创建成功后它会给你一大段文字，里面有一行：
+
+    Use this token to access the HTTP API:
+    1234567890:AAHxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+下面那串「数字:字母」就是 token。
+长按它 → 复制 → 发给我就行了。
+
+⚠️ token 相当于这个机器人的钥匙，只发给我一个人，不要发到群里或告诉别人。
+`;
+
+var TUT_BIND = `
+【拿到绑定码之后怎么用】
+
+我会发给你一条这样的消息：
+
+    /admin XXXXXXXXX
+
+你这样操作：
+1. 在 Telegram 里打开你刚建好的那个机器人
+2. 把 /admin XXXXXXXXX 原样发过去（注意前面有个斜杠 /）
+3. 机器人回复「✅ 绑定成功」，就完成了
+
+绑定之后（客服机器人）：
+• 客户给机器人发消息 → 会自动转发到你的 Telegram
+• 你要回复 → 长按那条客户消息 → 点「回复」→ 输入内容发送
+  （不点「回复」直接发的话，消息发不出去）
+• 常用指令：
+    /list    查看最近联系过的客户
+    /help    查看全部指令
+
+⚠️ 想一直能收到客户消息，手机上的 Telegram 要保持登录，
+   也不要把这个机器人拉黑或删掉对话。
+`;
+
+var TUT = TUT_MAKE + '\n' + TUT_BIND;
+document.getElementById('tut').textContent = TUT;
+
+// ★ /m 一律显示登录页，不自动登录 —— 那是客户的入口，
+//   别把浏览器里存着的管理员身份套上去
+if(!IS_M && (TOK || PW)){ api('/api/bots').then(startUI).catch(function(){}); }
+// 图片点一下用浏览器自己的看图（能缩放、能拖）
+document.addEventListener('click', function(e){
+  if(e.target && e.target.tagName === 'IMG' && e.target.closest('#msgStream')){
+    window.open(e.target.src, '_blank');
+  }
+});
+
+/* ==================================================================
+   顶部标签切换
+   ================================================================== */
+var TABS = ['msg', 'bots', 'add', 'merch', 'help', 'logs'];
+var CUR_TAB = 'msg';
+
+function switchTab(name, skipSave){
+  if(TABS.indexOf(name) < 0) name = 'msg';
+  CUR_TAB = name;
+  TABS.forEach(function(t){
+    var pane = document.getElementById('pane-' + t);
+    if(pane) pane.style.display = (t === name) ? '' : 'none';
+  });
+  var btns = document.querySelectorAll('#tabs .tab');
+  Array.prototype.forEach.call(btns, function(b){
+    b.classList.toggle('on', b.getAttribute('data-pane') === name);
+  });
+  // 商户端没有「消息记录 / 添加机器人 / 商户管理 / 登录记录」
+  // ★ 消息记录是管理端专属（后端 _admin_only 也拦着），商户连标签都藏了，
+  //   这里再兜一道 —— 万一从 localStorage 里读回 'msg' 也不会漏进来。
+  if(ME.role !== 'admin'
+     && (name === 'msg' || name === 'add' || name === 'merch'
+         || name === 'logs')){
+    switchTab('bots', true); return;
+  }
+  if(!skipSave) { try{ localStorage.setItem('panel_tab', name); }catch(e){} }
+  if(name === 'msg') msgLoadBots();
+  if(name === 'bots') renderTypeTabs();
+  if(name === 'merch') loadMerch && loadMerch();
+  if(name === 'logs') loadLogins();
+  // 离开消息页就把轮询停了（省资源）
+  if(name !== 'msg') msgStopLive();
+}
+
+/* ★ 标签按钮的点击绑定 —— 别忘了！之前只加了 data-pane 属性、
+   没绑事件，结果点哪个都没反应（踩过） */
+document.addEventListener('click', function(e){
+  var b = e.target && e.target.closest ? e.target.closest('#tabs .tab') : null;
+  if(b) switchTab(b.getAttribute('data-pane'));
+});
+
+/* 商户端只留「机器人列表 / 使用说明」
+   ★ 商户后台就是给客户**配商城机器人**用的，其它机器人他无权用、
+     也不该看得见（用户 2026-09-28 明确）。
+     这里藏标签，switchTab 里还有一道兜底。 */
+function applyRoleTabs(){
+  var admin = ME.role === 'admin';
+  var btns = document.querySelectorAll('#tabs .tab');
+  Array.prototype.forEach.call(btns, function(b){
+    var p = b.getAttribute('data-pane');
+    if(p === 'add' || p === 'merch' || p === 'logs' || p === 'msg'){
+      b.style.display = admin ? '' : 'none';
+    }
+  });
+  // 使用说明：商户只看得到「商城机器人」那一节
+  // ★ 选择器是 `[data-for]` 不是 `details[data-for]` —— 顶部那块
+  //   「📖 使用说明」提示也要能标记（它让人先看怎么拿到机器人，
+  //   而那节商户看不到，留着误导）
+  var cards = document.querySelectorAll('#pane-help [data-for]');
+  Array.prototype.forEach.call(cards, function(c){
+    c.style.display = (admin || c.getAttribute('data-for') === 'shop')
+      ? '' : 'none';
+  });
+}
+
+/* ==================================================================
+   登录记录
+   ================================================================== */
+function fmtFull(sec){
+  if(!sec) return '';
+  var d = new Date(sec * 1000);
+  var p = function(n){ return (n < 10 ? '0' : '') + n; };
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate())
+       + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+}
+
+function uaLabel(ua){
+  ua = ua || '';
+  var os = /Android/i.test(ua) ? '安卓'
+         : /iPhone|iPad|iOS/i.test(ua) ? 'iPhone'
+         : /Windows/i.test(ua) ? 'Windows'
+         : /Mac OS X/i.test(ua) ? 'Mac'
+         : /Linux/i.test(ua) ? 'Linux' : '';
+  var br = /Edg\//i.test(ua) ? 'Edge'
+         : /MicroMessenger/i.test(ua) ? '微信'
+         : /Chrome/i.test(ua) ? 'Chrome'
+         : /Safari/i.test(ua) ? 'Safari'
+         : /Firefox/i.test(ua) ? 'Firefox' : '';
+  var out = [os, br].filter(Boolean).join(' ');
+  return out || (ua ? '其它' : '');
+}
+
+/* ==================================================================
+   谷歌验证码（TOTP）
+   ★ 看真实 IP / 清空记录 都要输；密钥来自服务器 config.json
+   ★ 服务端验过一次之后记 5 分钟（一次看几条 IP 不用输 5 遍）
+   ================================================================== */
+var TOTP = { bound: false, unlocked: false, act: null, secret: '' };
+
+function loadTotp(){
+  api('/api/totp').then(function(d){
+    if(!d.ok) return;
+    TOTP.secret = d.secret || '';
+    TOTP.bound = !!d.bound;
+    var box = document.getElementById('totp-body');
+    if(!box) return;
+    // ★ 启用了就**什么都不显示**（用户要求：默认就是开着的，
+    //   也不给「换密钥」的入口）—— 界面上不用再念叨这件事。
+    if(TOTP.bound){
+      box.innerHTML = '';
+      return;
+    }
+    // 还没启用：把密钥摆出来，并且**把「必须回来点按钮」说在最前面**
+    // ★★ 用户 2026-09-28 就栽在这儿：在 App 里加好了密钥，
+    //    以为就完事了 —— 结果面板这边还是「未启用」，
+    //    点「看真实 IP」提示没绑定，一脸懵。
+    //    服务端**没法知道**你手机上加没加，只能靠你点一下确认，
+    //    所以这一步必须在最显眼的位置说清楚。
+    box.innerHTML = '🔓 <b>谷歌验证码还没启用</b>'
+      + '（现在看真实 IP、清空记录都不用输码）<br><br>'
+      + '<b>第 1 步</b>：手机装个验证器 App（<b>Google Authenticator</b>、'
+      + '微软 Authenticator、1Password 都行）→ 选「添加账户 → '
+      + '<b>输入设置密钥</b>」→ 把这串填进去：'
+      + '<div style="margin:8px 0;font-family:monospace;font-size:15px;'
+      + 'letter-spacing:2px;word-break:break-all;cursor:pointer" '
+      + 'title="点一下复制" '
+      + 'onclick="copyText(TOTP.secret, \'密钥已复制，去 App 里粘贴\')">'
+      + '👉 <b>' + esc(TOTP.secret) + '</b></div>'
+      + '<b>第 2 步</b>：<b style="color:#d29922">回到这里点下面的按钮</b>，'
+      + '输一次 App 上显示的 6 位数字 —— '
+      + '<b style="color:#d29922">光在 App 里加好是不算的，'
+      + '必须点这个按钮才生效</b>。<br>'
+      + '<button class="sm" style="margin-top:8px" onclick="bindTotp()">'
+      + '✅ 启用验证码保护</button>';
+  }).catch(function(){});
+}
+
+function askTotp(act, tip){
+  TOTP.act = act;
+  var t = document.getElementById('totpTip');
+  if(t) t.textContent = tip
+    || '打开手机上的验证器 App，输入当前显示的 6 位数字。';
+  var i = document.getElementById('totp_code');
+  if(i) i.value = '';
+  var box = document.getElementById('totpModal');
+  if(box) box.style.display = 'flex';
+  setTimeout(function(){ if(i && i.focus) i.focus(); }, 60);
+}
+
+function closeTotp(){
+  var box = document.getElementById('totpModal');
+  if(box) box.style.display = 'none';
+}
+
+function submitTotp(){
+  var i = document.getElementById('totp_code');
+  var code = ((i && i.value) || '').trim();
+  if(!/^\d{6}$/.test(code)){ toast('请输入 6 位数字'); return; }
+  var act = TOTP.act;          // ★ 先记下来，closeTotp 之后 TOTP.act 就没了
+  closeTotp();
+  if(act === 'reveal') doReveal(code);
+  else if(act === 'clear') doClear(code);
+  else if(act === 'bind') doBind(code);
+  else if(act === 'reset') doReset(code);
+}
+
+function bindTotp(){
+  askTotp('bind', '输一次手机 App 上现在显示的 6 位数字，对得上才算绑好。');
+}
+
+/* 换密钥（★ 界面上**没有入口** —— 用户要求「默认就是开启了，
+   也没有换一个密钥的选项入口」。留着是为了**手机丢了/换手机**时能救急：
+   在浏览器按 F12 → Console → 敲 resetTotp() 回车。
+   ★ 它会先要一次旧验证码，所以不是后门。真连手机都没了就找管理员，
+     把 config.json 里的 totp_secret / totp_bound 删掉即可。） */
+function resetTotp(){
+  if(!confirm('换一个密钥？\n\n换完旧手机上的验证码就失效了，'
+              + '要用新密钥重新绑一次。')) return;
+  askTotp('reset', '先输一次现在的验证码 —— 防止别人拿到面板密码就能把验证码拆掉。');
+}
+
+function doBind(code){
+  api('/api/totp/bind', {method: 'POST', body: JSON.stringify({code: code})})
+    .then(function(d){
+      if(!d.ok){ toast(d.error || '验证码不对'); return; }
+      toast('绑定成功！以后看真实 IP、清空记录都要输验证码');
+      loadTotp();
+    }).catch(function(){ toast('绑定失败'); });
+}
+
+function doReset(code){
+  api('/api/totp/reset', {method: 'POST', body: JSON.stringify({code: code})})
+    .then(function(d){
+      if(!d.ok){ toast(d.error || '验证码不对'); return; }
+      TOTP.secret = d.secret || '';
+      toast('换了新密钥，去 App 里重新绑一次');
+      // ★★ 必须调 loadTotp()：换完密钥服务端把 bound 置回 false，
+      //    这时候**新密钥要立刻显示出来**给用户去 App 里加。
+      //    原来只调了 loadLogins()（那是登录记录的），结果换完密钥界面上
+      //    **什么都没有** —— 用户得自己想到按 F5 刷新才能看到新密钥，
+      //    而这条路径本来就是「手机丢了/换手机」时的救急流程，
+      //    最需要一眼看懂。（2026-09-29 修）
+      loadTotp();
+      loadLogins();
+    }).catch(function(){ toast('换密钥失败'); });
+}
+
+function doReveal(code){
+  api('/api/logins/reveal',
+      {method: 'POST', body: JSON.stringify({code: code})})
+    .then(function(d){
+      if(!d.ok){ toast(d.error || '验证失败'); return; }
+      TOTP.unlocked = true;
+      toast('已解锁 —— 5 分钟内不用再输');
+      renderLogins(d.logins || [], null);
+    }).catch(function(){ toast('验证失败'); });
+}
+
+function doClear(code){
+  api('/api/logins/clear',
+      {method: 'POST', body: JSON.stringify({code: code})})
+    .then(function(d){
+      if(!d.ok){ toast(d.error || '清空失败'); return; }
+      toast('已清空 ' + (d.cleared || 0) + ' 条');
+      loadLogins();
+    }).catch(function(){ toast('清空失败'); });
+}
+
+function loadLogins(){
+  var box = document.getElementById('list-logs');
+  if(!box) return;
+  // ★★ 这里必须用 setHTML，不能直接 box.innerHTML = ...
+  //   setHTML 靠「上次画的是什么」来决定要不要跳过重画；
+  //   直写会让缓存和真实 DOM 对不上 —— 结果「加载中…」写进去之后，
+  //   真数据回来时一比对「跟上次一样」就**跳过不画了**，
+  //   「加载中…」永远留在那儿（2026-09-29 踩过，用户报「一直加载不出来」）
+  setHTML('list-logs', '<div class="empty">加载中…</div>');
+  loadTotp();
+  api('/api/logins').then(function(d){
+    if(!d.ok) throw new Error(d.error || '读取失败');
+    TOTP.bound = !!d.bound;
+    TOTP.unlocked = !!d.unlocked;
+    renderLogins(d.logins || [], d.stats || {});
+  }).catch(function(e){
+    setHTML('list-logs', '<div class="empty">' + esc(e.message || '读取失败')
+                       + '</div>');
+  });
+}
+
+function renderLogins(rows, st){
+  var box = document.getElementById('list-logs');
+  if(!box) return;
+  if(st){
+    // ★ 只报总数。原来还带「失败 M 次」—— 那也是「结果」，
+    //   用户 2026-09-29 说「把结果去掉」，一并去掉了
+    var c = document.getElementById('cnt-logs');
+    if(c) c.textContent = '（共 ' + (st.total || 0) + ' 次）';
+  }
+  // 按钮文字跟着状态走
+  var btn = document.getElementById('btn-reveal');
+  if(btn){
+    btn.textContent = TOTP.unlocked ? '🔒 锁上' : '🔓 看真实 IP';
+  }
+  if(!rows.length){
+    setHTML('list-logs', '<div class="empty">还没有登录记录</div>');
+    return;
+  }
+  var on = TOTP.unlocked;
+  // ★ 只留这四列：时间 / IP / 城市 / 设备
+  //   用户 2026-09-29 明确要求去掉「谁 / 方式 / 结果」三列。
+  //   ⚠️ 别加回来（他嫌乱）。「失败次数」在标题那行的（共 N 次，失败 M 次）里还看得到。
+  var h = '<div class="tblwrap"><table><tr><th>时间</th>'
+        + '<th>IP</th><th>城市</th><th>设备</th></tr>';
+  rows.forEach(function(r){
+    // ★ IP：解锁前只给打码的（后两段是 *），点一下去输验证码
+    var ip;
+    // ★ 不加 class="code" —— 那个是绑定码那种黄色高亮，用户说
+    //   「显示完整 ip 这里颜色不需要加深，和背景颜色一样即可」
+    if(on && r.ip){
+      ip = '<td style="cursor:pointer" title="点一下复制"'
+         + ' onclick="copyText(\'' + jsq(r.ip) + '\', \'IP 已复制\')">'
+         + esc(r.ip) + '</td>';
+    }else{
+      ip = '<td class="muted" style="cursor:pointer"'
+         + ' title="这是打码过的，点一下输谷歌验证码看真实的"'
+         + ' onclick="askTotp(\'reveal\')">🔒 ' + esc(r.ip_masked || '—')
+         + '</td>';
+    }
+    h += '<tr>'
+      + '<td style="white-space:nowrap">' + fmtFull(r.t) + '</td>'
+      + ip
+      + '<td>' + (r.city ? esc(r.city)
+                         : '<span class="muted">查询中…</span>') + '</td>'
+      + '<td class="muted">' + esc(uaLabel(r.ua)) + '</td>'
+      + '</tr>';
+  });
+  setHTML('list-logs', h + '</table></div>');
+}
+
+/* 「看真实 IP」按钮：没解锁就去验证，已解锁就重新锁上 */
+function revealLogins(){
+  if(TOTP.unlocked){
+    TOTP.unlocked = false;
+    toast('已锁上 —— 真实 IP 又藏起来了');
+    loadLogins();
+    return;
+  }
+  if(!TOTP.bound){
+    toast('还没绑定谷歌验证码 —— 先在上面绑定，绑好之后看真实 IP 就要输码了');
+    return;
+  }
+  askTotp('reveal', '输入验证码才能看真实 IP。看一次解锁 5 分钟。');
+}
+
+function clearLogins(){
+  if(!TOTP.bound){
+    if(!confirm('还没绑定谷歌验证码，现在清空不用输码。\n\n确定清空？')) return;
+    doClear('');
+    return;
+  }
+  askTotp('clear', '清空会毁掉审计痕迹，所以也要输验证码。');
+}
+
+/* ==================================================================
+   机器人列表：先选类型，再看那一类
+   ================================================================== */
+/* ★ 顺序 = 用户指定的：记账 → 客服 → USDT → 商城（2026-09-28）
+   改这里的同时，`<select id="type">` 和 `manager.RUNNERS` 也要一起改，
+   三处保持同一个顺序。 */
+var TYPE_TABS = [
+  {v: 'ledger', label: '📒 记账机器人'},
+  {v: 'kefu',   label: '📨 客服机器人'},
+  {v: 'usdt',   label: '💰 USDT 助手'},
+  {v: 'shop',   label: '🛒 商城机器人'}
+];
+// ★ 默认选中第一个 —— 别写死 'kefu'，不然以后调整顺序这里就不同步了
+var CUR_TYPE = TYPE_TABS[0].v;
+
+/* ★ 当前身份**能看的**机器人类型。
+   商户后台只给客户配商城机器人（用户 2026-09-28 明确：
+   「这个商户后台是给客户配置商城机器人的后台，其他机器人他都无权用，
+     也不显示」），所以其它三类对商户整个不出现。 */
+function typeTabs(){
+  return (ME.role === 'admin') ? TYPE_TABS
+       : TYPE_TABS.filter(function(t){ return t.v === 'shop'; });
+}
+
+function renderTypeTabs(){
+  var box = document.getElementById('typeTabs');
+  if(!box) return;
+  var counts = {};
+  (LAST_ALL || []).forEach(function(b){
+    counts[b.type] = (counts[b.type] || 0) + 1;
+  });
+  var h = '';
+  typeTabs().forEach(function(t){
+    var n = counts[t.v] || 0;
+    h += '<button class="ttab' + (t.v === CUR_TYPE ? ' on' : '')
+       + '" data-t="' + t.v + '" onclick="showType(\'' + jsq(t.v) + '\')">'
+       + t.label + (n ? ' <span class="tcnt">' + n + '</span>' : '') + '</button>';
+  });
+  box.innerHTML = h;
+  showType(CUR_TYPE, true);
+}
+
+function showType(t){
+  // ★ 商户只能看商城那一类 —— 传别的进来（比如旧 localStorage）也不认
+  var allowed = typeTabs().map(function(x){ return x.v; });
+  if(allowed.indexOf(t) < 0) t = allowed[0] || 'shop';
+  CUR_TYPE = t;
+  var box = document.getElementById('typeTabs');
+  if(box){
+    // ★ 用 data-t 比，别拿按钮文字比 —— 文字里带数量（「客服机器人 2」），
+    //   以后改文案就悄悄坏了
+    Array.prototype.forEach.call(box.querySelectorAll('.ttab'), function(b){
+      b.classList.toggle('on', b.getAttribute('data-t') === t);
+    });
+  }
+  ['kefu', 'usdt', 'shop', 'ledger'].forEach(function(k){
+    var el = document.getElementById('card-' + k);
+    if(el) el.style.display = (k === t) ? '' : 'none';
+  });
+}
+
+/* ==================================================================
+   消息记录：机器人 → 群 → 群内消息
+   ================================================================== */
+var MSG = {BOTS: [], BID: '', CHAT: '', CURSOR: '', SEEN: {}, UNREAD: {},
+           TIMER: null, BUSY: false, LEVEL: 1};
+var ARCHIVE_TYPES = ['ledger'];
+
+function seenKey(bid){ return 'panel_seen_' + bid; }
+
+/* 一条消息的唯一标识（会话 + 消息id）—— 去重、定位都用它 */
+function keyOf(m){ return m.chat_id + '|' + m.message_id; }
+
+/* ★ 整行可点的时候，行里的按钮必须阻止冒泡 ——
+   不然点「备注」「置顶」会顺带把整行的「进群列表」也触发了 */
+function stopEv(e){
+  if(e && e.stopPropagation) e.stopPropagation();
+  if(e && e.preventDefault) e.preventDefault();
+}
+
+/* ★ 群置顶跟 /messages 那页**共用同一个 key** ——
+   在面板里置顶了，全屏页里也照样置顶，反过来也一样 */
+function getPinChats(bid){
+  try{ return JSON.parse(localStorage.getItem('panel_pinned_' + bid) || '[]') || []; }
+  catch(e){ return []; }
+}
+
+function pinChat(cid){
+  var list = getPinChats(MSG.BID);
+  cid = String(cid);
+  if(list.indexOf(cid) >= 0) list = list.filter(function(x){ return x !== cid; });
+  else list.unshift(cid);
+  try{ localStorage.setItem('panel_pinned_' + MSG.BID, JSON.stringify(list)); }catch(e){}
+  if(MSG.BID) msgOpenBot(MSG.BID);
+}
+
+function msgSeen(bid){
+  try{ return JSON.parse(localStorage.getItem(seenKey(bid)) || '{}') || {}; }
+  catch(e){ return {}; }
+}
+
+function msgSaveSeen(bid, v){
+  try{ localStorage.setItem(seenKey(bid), JSON.stringify(v)); }catch(e){}
+}
+
+function fmtTs(iso){
+  if(!iso) return '';
+  var d = new Date(iso);
+  if(isNaN(d.getTime())) return String(iso);
+  var p = function(n){ return (n < 10 ? '0' : '') + n; };
+  return (d.getMonth() + 1) + '-' + p(d.getDate()) + ' '
+       + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+
+/* ---- 第 1 级：机器人列表（+未读）---- */
+function msgLoadBots(silent){
+  var box = document.getElementById('msgBots');
+  if(!box) return;
+  var all = (LAST_ALL || []).filter(function(b){
+    return ARCHIVE_TYPES.indexOf(b.type) >= 0;
+  });
+  MSG.BOTS = all;
+  if(!all.length){
+    setHTML('msgBots', '<div class="empty">还没有记账机器人<br>'
+      + '<span class="muted">只有记账机器人能记录消息</span></div>');
+    return;
+  }
+  // ★ 必须走 setHTML（见 loadLogins 上面的说明）：
+  //   直写会和 setHTML 的缓存对不上，导致「加载中…」卡住不再重画
+  if(!silent) setHTML('msgBots', '<div class="empty">加载中…</div>');
+  // ★ 一次问全部机器人的未读（不是每个机器人一次请求）——
+  //   因为要每几秒刷一次，N 次请求太浪费
+  var seen = {};
+  all.forEach(function(b){ seen[b.id] = msgSeen(b.id); });
+  api('/api/archive/unread_all',
+      {method: 'POST', body: JSON.stringify({seen: seen})})
+    .then(function(d){
+      if(!d.ok) throw new Error(d.error || '读取失败');
+      // 第一次打开这个机器人：把服务端给的基线存下来（历史记录不算未读）
+      var base = d.base || {};
+      Object.keys(base).forEach(function(bid){ msgSaveSeen(bid, base[bid]); });
+      msgRenderBots(d.unread || {});
+    }).catch(function(e){
+      if(!silent){
+        setHTML('msgBots', '<div class="empty">'
+          + esc(e.message || '读取失败') + '</div>');
+      }
+    });
+}
+
+function msgRenderBots(res){
+  var box = document.getElementById('msgBots');
+  if(!box) return;
+  // ★ 排序：置顶的 → 有未读的 → 名字
+  var order = MSG.BOTS.slice().sort(function(a, b){
+    var pa = isBotPinned(a.id) ? 0 : 1, pb = isBotPinned(b.id) ? 0 : 1;
+    if(pa !== pb) return pa - pb;
+    var ua = sumUnread(res[a.id]), ub = sumUnread(res[b.id]);
+    if(ua !== ub) return ub - ua;
+    return (a.note || '').localeCompare(b.note || '');
+  });
+  var total = 0;
+  // ★ 点整行就进群列表 —— 所以「记录 / 状态」那两列删了，
+  //   「看消息」按钮也删了（多余）。按钮记得 stopPropagation，不然点备注会误进。
+  var h = '<div class="tblwrap"><table class="ctr ctr-mid"><tr><th>机器人</th><th>未读</th><th>操作</th></tr>';
+  order.forEach(function(b){
+    var on = !!(b.archive || {}).enabled;
+    var n = sumUnread(res[b.id]);
+    var pin = isBotPinned(b.id);
+    total += n;
+    h += '<tr style="cursor:pointer' + (pin ? ';background:#161d29' : '')
+      + '" onclick="msgOpenBot(\'' + jsq(b.id) + '\')"'
+      + ' title="点这一行看它的群消息">'
+      + '<td>' + (pin ? '📌 ' : '')
+        + '<b>' + esc(b.note) + '</b>'
+        + '<div class="muted">@' + esc(b.username) + '</div></td>'
+      + '<td>' + (n ? '<span class="badge">' + (n > 99 ? '99+' : n) + '</span>'
+                    : '<span class="muted">—</span>') + '</td>'
+      + '<td style="white-space:nowrap">'
+        // ★ 机器人这一级**没有**记录开关：
+        //   记录是**默认就开**的（用户 2026-09-28 明确：「机器人默认都是开的，
+        //   只有消息列表是我个人选择开或者关的」），关的粒度在**按群**，
+        //   按钮在下一级（群列表）里。整个机器人不想记了就在「机器人列表」
+        //   里停用/删除。
+        //   ★ 别再往这儿加「开启记录」——核心那边已经把「缺字段」当「开」了。
+        + '<button class="gray sm" onclick="stopEv(event);editNote(\'' + b.id
+        + '\')" title="给这个机器人改个备注名">备注</button> '
+        + '<button class="' + (pin ? '' : 'gray') + ' sm"'
+        + ' onclick="stopEv(event);pinBot(\'' + jsq(b.id) + '\')"'
+        + ' title="' + (pin ? '取消置顶' : '置顶，排到最前面')
+        + '">' + (pin ? '已置顶' : '置顶') + '</button>'
+      + '</td></tr>';
+  });
+  setHTML('msgBots', h + '</table></div>');
+  var c = document.getElementById('cnt-msg');
+  if(c) c.textContent = total ? '（' + total + ' 条未读）'
+                              : '（' + MSG.BOTS.length + ' 个机器人）';
+}
+
+/* ---------- 机器人置顶 & 备注（存在浏览器里，按人分开）---------- */
+function prefsWho(){ return 'panel_pref_' + ((ME && ME.mid) || 'admin'); }
+
+function getPinBots(){
+  try{ return JSON.parse(localStorage.getItem(prefsWho() + '_bots') || '[]') || []; }
+  catch(e){ return []; }
+}
+
+function isBotPinned(id){ return getPinBots().indexOf(id) >= 0; }
+
+function pinBot(id){
+  var list = getPinBots();
+  if(list.indexOf(id) >= 0) list = list.filter(function(x){ return x !== id; });
+  else list.unshift(id);
+  try{ localStorage.setItem(prefsWho() + '_bots', JSON.stringify(list)); }catch(e){}
+  msgLoadBots();
+}
+
+/* 改备注名（就是机器人列表里那个备注，随时能改） */
+function editNote(id){
+  var b = MSG.BOTS.filter(function(x){ return x.id === id; })[0]
+       || (LAST_ALL || []).filter(function(x){ return x.id === id; })[0];
+  if(!b) return;
+  var v = prompt('这个机器人的备注名：', b.note || '');
+  if(v === null) return;
+  v = v.trim();
+  if(!v){ toast('备注不能为空'); return; }
+  if(v === b.note) return;
+  api('/api/bots/' + id + '/note', {method:'POST', body: JSON.stringify({note: v})})
+    .then(function(d){
+      if(!d.ok){ toast(d.error || '改备注失败'); return; }
+      b.note = v;
+      toast('备注改好了');
+      refresh();
+    }).catch(function(){ toast('改备注失败'); });
+}
+
+/* 补票：添加的时候忘了勾「跑在客户自己的服务器上」，在这儿补上。
+   ★ 为什么需要：那个勾选框只在**添加**时才有，忘了勾只能删掉重建，
+     而重建会换一个机器人 id，**已经发给客户的安装包当场失效**。
+   点完之后本面板就不再启动它了（改由客户的服务器跑）。 */
+function setRemote(id, note){
+  if(!confirm('把「' + note + '」改成「客户自建」？\n\n'
+      + '· 本面板**不再运行**它，改由客户自己的服务器跑\n'
+      + '· 操作列会多出一个「⬇️ 安装包」\n\n'
+      + '如果它现在正跑在本面板上，改完就停了。')) return;
+  api('/api/bots/' + id + '/remote',
+      {method:'POST', body: JSON.stringify({on: true})})
+    .then(function(d){
+      if(!d.ok){ toast(d.error || '改不了'); return; }
+      toast('改好了 —— 现在点「⬇️ 安装包」下载给客户');
+      refresh();
+    }).catch(function(){ toast('改不了'); });
+}
+
+/* ★★ 一键下载「客户安装包」—— 全自动的那一步
+
+   把客户要装的东西**现打成一个 zip**，里面的 config.json 已经填好了
+   （机器人编号 + token + 你的面板地址）。下载下来直接发给客户、或者
+   自己拿去装，**不用粘任何东西**，客户解压就能跑。
+
+   ★ 为什么用 fetch 而不是 api()：api() 只会解 JSON，zip 是二进制。
+   ★ 为什么不用个 <a href> 直接链过去：浏览器点链接发不出密码头，
+     会被面板挡在门外（跟 /messages 那个页面一个道理）。 */
+function soloZip(id, note){
+  toast('正在打包装，稍等…');
+  fetch('/api/bots/' + id + '/solozip?url='
+        + encodeURIComponent(location.origin),
+        {headers: apiHeaders()})
+    .then(function(r){
+      if(!r.ok) throw new Error('HTTP ' + r.status);
+      return r.blob();
+    })
+    .then(function(b){
+      var url = URL.createObjectURL(b);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = '记账独立版-' + (note || id) + '.zip';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(function(){ URL.revokeObjectURL(url); }, 10000);
+      toast('下载好了 —— 直接发给客户，解压后跑 install.sh');
+    })
+    .catch(function(e){ toast('打包失败：' + (e && e.message || e)); });
+}
+
+function sumUnread(m){
+  var n = 0;
+  if(m) Object.keys(m).forEach(function(k){ n += m[k] || 0; });
+  return n;
+}
+
+/* 给某个群加备注（只你自己看得到，不影响 Telegram 里那个群） */
+function noteChat(bid, cid){
+  var b = MSG.BOTS.filter(function(x){ return x.id === bid; })[0];
+  var cur = ((b && b.archive && b.archive.chat_notes) || {})[String(cid)] || '';
+  var v = prompt('给这个群加个备注（只你自己看得到）：', cur);
+  if(v === null) return;
+  v = v.trim();
+  api('/api/archive/' + bid + '/chatnote',
+      {method: 'POST', body: JSON.stringify({chat_id: cid, note: v})})
+    .then(function(d){
+      if(!d.ok){ toast(d.error || '改备注失败'); return; }
+      if(b){
+        if(!b.archive) b.archive = {};
+        var m = Object.assign({}, b.archive.chat_notes || {});
+        if(v) m[String(cid)] = v; else delete m[String(cid)];
+        b.archive.chat_notes = m;
+      }
+      toast(v ? '备注存好了' : '备注清掉了');
+      msgOpenBot(bid, true);
+    }).catch(function(){ toast('改备注失败'); });
+}
+
+/* 按群开/关记录（群列表里那个按钮）
+   ★ 关了就是**真的不往库里写**了；已经记下的还在，48 小时后自动删。 */
+function muteChat(bid, cid, mute){
+  if(mute && !confirm('这个群不再记录新消息。\n已经记下的还在（48 小时后自动删）。\n\n确定吗？')){
+    return;
+  }
+  api('/api/archive/' + bid + '/mute',
+      {method: 'POST', body: JSON.stringify({chat_id: cid, mute: mute})})
+    .then(function(d){
+      if(!d.ok){ toast(d.error || '设置失败'); return; }
+      toast(mute ? '已停止记录这个群' : '已恢复记录这个群');
+      // 本地那份配置也跟上，免得下次渲染还是旧的
+      var b = MSG.BOTS.filter(function(x){ return x.id === bid; })[0];
+      if(b){
+        if(!b.archive) b.archive = {};
+        var m = (b.archive.mute_chats || []).map(String);
+        m = mute ? m.concat([String(cid)]) : m.filter(function(x){ return x !== String(cid); });
+        b.archive.mute_chats = m;
+      }
+      msgOpenBot(bid, true);
+    }).catch(function(){ toast('设置失败'); });
+}
+
+/* ---- 第 2 级：这个机器人有哪些群 ---- */
+function msgOpenBot(bid, silent){
+  MSG.BID = bid;
+  var b = MSG.BOTS.filter(function(x){ return x.id === bid; })[0]
+       || (LAST_ALL || []).filter(function(x){ return x.id === bid; })[0] || {};
+  msgGoto(2, true);      // ★ skipLoad：下面自己会加载，别让它回头再调一次自己
+  var box = document.getElementById('msgChats');
+  // ★ 走 setHTML（见 loadLogins 上面的说明）：直写会让缓存和 DOM 对不上，
+  //   于是「加载中…」卡住、真数据回来也不重画
+  if(box && !silent) setHTML('msgChats', '<div class="empty">加载中…</div>');
+  api('/api/archive/' + bid + '/chats').then(function(d){
+    if(!d.ok) throw new Error(d.error || '读取失败');
+    var chats = d.chats || [], st = d.stats || {};
+    var c2 = document.getElementById('cnt-msg2');
+    if(c2) c2.textContent = '（' + (st.count || 0) + ' 条消息）';
+    if(!chats.length){
+      setHTML('msgChats', '<div class="empty">这个机器人还没记到消息<br><br>'
+        + '<span class="muted">检查：<br>'
+        + '① 机器人是否已经拉进群（客服机器人是客户私聊它）<br>'
+        + '② 记账机器人是否去 BotFather 关掉了 Group Privacy<br>'
+        + '③ 群里发条消息试试</span></div>');
+      return;
+    }
+    var seen = msgSeen(bid);
+    var unread = {};
+    // 用「未读接口」算每个会话的未读
+    api('/api/archive/' + bid + '/unread?seen='
+        + encodeURIComponent(JSON.stringify(seen))).then(function(u){
+      unread = (u && u.unread) || {};
+      // ★ 置顶的群排前面（跟 /messages 那页共用同一份置顶数据）
+      var pinned = getPinChats(bid);
+      chats = chats.slice().sort(function(a, b){
+        var pa = pinned.indexOf(String(a.chat_id)) >= 0 ? 0 : 1;
+        var pb = pinned.indexOf(String(b.chat_id)) >= 0 ? 0 : 1;
+        if(pa !== pb) return pa - pb;
+        if(pa === 0){
+          return pinned.indexOf(String(a.chat_id))
+               - pinned.indexOf(String(b.chat_id));
+        }
+        return 0;
+      });
+      // ★ 同样点整行就进 —— 「看消息」按钮删掉
+      // ★ 按群「关闭记录」放在这里（机器人级那个删了）
+      var mutes = (b.archive && b.archive.mute_chats) || [];
+      var cnotes = (b.archive && b.archive.chat_notes) || {};
+      // ★ 列：群 / 消息数 / 未读 / 操作
+      //   「最后一条」那一列用户 2026-09-29 让删了（点进群就能看到，占地方）
+      var h = '<div class="tblwrap"><table class="ctr ctr-mid"><tr><th>群</th><th>消息数</th>'
+            + '<th>未读</th><th>操作</th></tr>';
+      chats.forEach(function(c){
+        var cid = String(c.chat_id);
+        var n = unread[cid] || 0;
+        var pin = pinned.indexOf(cid) >= 0;
+        var mute = mutes.indexOf(cid) >= 0;
+        var cnote = cnotes[cid] || '';
+        h += '<tr style="cursor:pointer' + (pin ? ';background:#161d29' : '')
+          + '" onclick="msgOpenChat(\'' + jsq(cid) + '\', \''
+          + jsq(c.title) + '\')" title="点这一行看群消息">'
+          + '<td>' + (pin ? '📌 ' : '') + '<b>' + esc(c.title) + '</b>'
+            + (mute ? ' <span class="muted">（已停记）</span>' : '')
+            + (cnote ? '<div class="muted" style="color:#e3b341">📝 '
+                       + esc(cnote) + '</div>' : '') + '</td>'
+          + '<td class="muted">' + c.count + '</td>'
+          + '<td>' + (n ? '<span class="badge">' + (n > 99 ? '99+' : n)
+                         + '</span>' : '<span class="muted">—</span>') + '</td>'
+          + '<td style="white-space:nowrap">'
+            + '<button class="' + (mute ? '' : 'gray') + ' sm"'
+            + ' onclick="stopEv(event);muteChat(\'' + b.id + '\',\'' + jsq(cid)
+            + '\',' + (mute ? 'false' : 'true') + ')"'
+            + ' title="' + (mute ? '恢复记录这个群' : '这个群不再记录（已经记下的还在，48 小时后自动删）')
+            + '">' + (mute ? '恢复记录' : '关闭记录') + '</button> '
+            + '<button class="gray sm"'
+            + ' onclick="stopEv(event);noteChat(\'' + b.id + '\',\'' + jsq(cid)
+            + '\')" title="给这个群加个备注（只你自己看得到）">备注</button> '
+            + '<button class="' + (pin ? '' : 'gray') + ' sm"'
+            + ' onclick="stopEv(event);pinChat(\'' + jsq(cid) + '\')"'
+            + ' title="' + (pin ? '取消置顶' : '置顶，排到最前面')
+            + '">' + (pin ? '已置顶' : '置顶') + '</button>'
+          + '</td></tr>';
+      });
+      setHTML('msgChats', h + '</table></div>');
+    }).catch(function(){
+      setHTML('msgChats', '<div class="empty">读取失败</div>');
+    });
+  }).catch(function(e){
+    setHTML('msgChats',
+            '<div class="empty">' + esc(e.message || '读取失败') + '</div>');
+  });
+}
+
+/* ---- 第 3 级：群内消息 ---- */
+function msgOpenChat(cid, title){
+  MSG.CHAT = cid;
+  MSG.CHAT_TITLE = title || cid;
+  var el = document.getElementById('msgChatName');
+  // ★ 显示**群名称**，不是那串 id（用户看不懂 -5187880290 是什么）
+  if(el) el.textContent = MSG.CHAT_TITLE;
+  msgGoto(3);      // msgGoto 里会把轮询拉起来
+  msgLoadMsgs();
+}
+
+/* ================= 群成员 =================
+   ★★ 口径先说清楚：**Telegram 不让机器人拉群成员全表**（Bot API 只有
+      「成员数」和「管理员列表」）。所以这里列的是**机器人见过发言的人**，
+      名字和用户名都取自他们的消息 —— 没发过言的人机器人根本不知道。
+      表头那行会照实写出来，不假装是「全部成员」。
+   ★ 数据来自归档库，所以**面板自己跑的机器人和客户自建那台都适用**。 */
+var MEM = {loaded: false};
+
+function msgToggleMembers(){
+  var box = document.getElementById('memBox');
+  if(!box) return;
+  var open = box.style.display !== 'none' && box.style.display !== '';
+  if(open){
+    box.style.display = 'none';
+    return;
+  }
+  box.style.display = 'block';
+  // ★ 只拉一次；换会话时 msgLoadMsgs() 会把 loaded 清掉
+  if(!MEM.loaded) msgLoadMembers();
+}
+
+function msgLoadMembers(){
+  var box = document.getElementById('memBox');
+  if(!box || !MSG.BID) return;
+  box.innerHTML = '<div class="empty" style="padding:16px">加载中…</div>';
+  api('/api/archive/' + MSG.BID + '/members?chat='
+      + encodeURIComponent(MSG.CHAT)).then(function(d){
+    if(!d.ok) throw new Error(d.error || '读取失败');
+    var rows = d.members || [];
+    MEM.loaded = true;
+    if(!rows.length){
+      box.innerHTML = '<div class="empty" style="padding:16px">'
+        + '这个会话还没有记录到发言人</div>';
+      return;
+    }
+    // ★ 直接上名单，**不要**上面那行说明（用户明确说不需要那个提示）
+    var html = '';
+    rows.forEach(function(m){
+      var name = m.display_name || m.username || m.user_id;
+      // 没设用户名的也照实说，别留一片空白让人以为没读到
+      var un = m.username ? '@' + esc(m.username) : '（没设用户名）';
+      var right = m.count
+        ? (m.count + ' 条 · 最后 ' + esc(fmtTs(m.last_ts)))
+        : '从没发过言';
+      html += '<div class="mrow">'
+        + '<span class="nm">' + esc(name) + '</span>'
+        + '<span class="un">' + un + '</span>'
+        + (m.admin_title
+           ? '<span class="mtag adm">' + esc(m.admin_title) + '</span>' : '')
+        + (m.is_owner ? '<span class="mtag own">主人</span>' : '')
+        + (m.is_bot ? '<span class="mtag bot">机器人</span>' : '')
+        + '<span class="rt">' + right + '</span>'
+        + '</div>';
+    });
+    box.innerHTML = html;
+  }).catch(function(e){
+    MEM.loaded = false;      // 失败了下次点还能重试
+    box.innerHTML = '<div class="empty" style="padding:16px">'
+      + esc(e.message || '读取失败') + '</div>';
+  });
+}
+
+function msgLoadMsgs(){
+  var box = document.getElementById('msgStream');
+  if(!box) return;
+  // ★ 这里是**故意**直写的，跟别处不一样：
+  //   · msgStream 不用 setHTML（它有自己的滚动逻辑，新消息是「追加」不是重画），
+  //     所以不存在「缓存和 DOM 对不上 → 卡在加载中」的问题
+  //   · 而且它一次打开只跑一遍，不参与轮询
+  //   ★ 哪天要把 msgStream 也改成 setHTML，这里必须一起改，否则就会卡住
+  box.innerHTML = '<div class="empty">加载中…</div>';
+  MSG.SEEN = {}; MSG.CURSOR = '';
+  // ★ 换会话了：成员表是要重拉的（每个群的成员不一样），顺手收起来
+  MEM.loaded = false;
+  var mbox = document.getElementById('memBox');
+  if(mbox){ mbox.style.display = 'none'; mbox.innerHTML = ''; }
+  api('/api/archive/' + MSG.BID + '/messages?limit=200&chat='
+      + encodeURIComponent(MSG.CHAT)).then(function(d){
+    if(!d.ok) throw new Error(d.error || '读取失败');
+    var rows = d.messages || [];
+    // 拿群名（会话列表里那份）
+    var c3 = document.getElementById('cnt-msg3');
+    if(c3) c3.textContent = '（' + rows.length + ' 条）';
+    if(!rows.length){
+      box.innerHTML = '<div class="empty">这个会话还没有消息</div>';
+      return;
+    }
+    rows.forEach(function(m){ MSG.SEEN[m.chat_id + '|' + m.message_id] = 1; });
+    MSG.CURSOR = newestTs(rows);
+    // ★ 接口给的是新的在前，页面要新的在最下面 → 翻过来
+    var asc = rows.slice().reverse();
+    // ★★ 有未读的话，停在**上次读到的地方**，别直接跳最底 ——
+    //    不然一进来看到的是一片新消息，还得自己往回翻才知道读到哪了
+    var lastSeen = msgSeen(MSG.BID)[String(MSG.CHAT)] || '';
+    var jumpKey = firstUnreadKey(asc, lastSeen);
+    box.innerHTML = asc.map(function(m){
+      return (jumpKey && keyOf(m) === jumpKey
+              ? '<div class="newline">↓ 上次看到这里，下面是新消息 ↓</div>' : '')
+           + msgBubble(m);
+    }).join('');
+    if(jumpKey) msgScrollToKey(jumpKey); else msgScrollBottom();
+    msgLoadImages();
+    // 打开会话 = 已读
+    var seen = msgSeen(MSG.BID);
+    seen[String(MSG.CHAT)] = MSG.CURSOR;
+    msgSaveSeen(MSG.BID, seen);
+  }).catch(function(e){
+    box.innerHTML = '<div class="empty">' + esc(e.message || '读取失败') + '</div>';
+  });
+}
+
+function newestTs(rows){
+  var m = '';
+  rows.forEach(function(x){ if(x.ts && x.ts > m) m = x.ts; });
+  return m;
+}
+
+function msgBubble(m){
+  var own = !!m.is_owner;
+  // ★ 机器人自己发的（账单、回执）单独一种样式：居中、灰底、标「机器人」。
+  //   不这么分的话，账单跟群友说的话混在一起，看着像群友发的
+  var bot = !!m.is_bot && !own;
+  var cls = bot ? ' bot' : (own ? ' right' : '');
+  var name = bot ? '机器人'
+      : (m.display_name || m.username || m.user_id || '未知');
+  // ★ 右侧（机器人主人）原来标的是「我」，用户要求换成**昵称 + 用户名**
+  //   （跟左边那些人一样，比如「灰产王 @HCW2026」）—— 主人可能有好几个号，
+  //   标「我」的话截屏、对账时分不清是谁。
+  //   ★ **不要数字 id**（用户明确说过不要 6196364329 那串）。
+  var extra = (!bot && m.username) ? '@' + esc(m.username) : '';
+  // ★ data-key 必须带上 —— 去重和「滚到上次已读位置」都靠它定位
+  return '<div class="mb' + cls + '" data-key="' + esc(keyOf(m)) + '">'
+    + '<div class="col">'
+    + '<div class="mmeta"><b>' + esc(name) + '</b>'
+    + (extra ? ' <span class="muted">' + extra + '</span>' : '')
+    + ' <span class="muted">' + fmtTs(m.ts) + '</span></div>'
+    + '<div class="bb">' + esc(m.text)
+    + (m.media ? '<img data-name="' + esc(m.media) + '">' : '')
+    + '</div></div></div>';
+}
+
+function msgScrollBottom(){
+  var el = document.getElementById('msgStream');
+  if(el) el.scrollTop = el.scrollHeight;
+}
+
+/* 是不是已经贴在底部附近（留 120px 余量） */
+function msgNearBottom(){
+  var el = document.getElementById('msgStream');
+  if(!el) return true;
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+}
+
+/* 第一条「比上次已读更新」的消息 —— rowsAsc 是老的在前。
+   返回它的 key；全都读过了就返回空串（那就照旧停在最底）。
+
+   ★ 机器人自己发的（账单/回执）要跳过：服务器算未读时也没算它们
+     （archive.py 的 unread_counts）。不跳的话两边口径不一致 ——
+     列表显示 0 条未读，点进去却跳出一条「上次看到这里」的分界线。 */
+function firstUnreadKey(rowsAsc, lastSeen){
+  for(var k = 0; k < (rowsAsc || []).length; k++){
+    var m = rowsAsc[k];
+    if(m && m.is_bot) continue;
+    if(m && m.ts > (lastSeen || '')) return keyOf(m);
+  }
+  return '';
+}
+
+/* 滚到某条消息那儿去（留一点上边距，别贴着顶） */
+function msgScrollToKey(k){
+  var box = document.getElementById('msgStream');
+  if(!box || !box.querySelector) return;
+  var el = box.querySelector('[data-key="' + k + '"]');
+  if(!el) return;
+  var top = 0;
+  for(var n = el; n && n !== box; n = n.parentNode){ top += n.offsetTop || 0; }
+  box.scrollTop = Math.max(0, top - 12);
+}
+
+/* ★★ 图片缓存：文件名 → blob 地址
+   为什么必须有：消息流每 3 秒整体重画一次（box.innerHTML = ...），
+   重画之后所有 <img> 又变回「没有 src」。不缓存的话每重画一轮
+   就要重新去服务器拉一遍 —— 已经下好的图也重下，
+   表现就是「缓存好的图片重新打开还要再缓存一遍」。
+
+   ★ 图片文件名里带着 file_id 的哈希（archive.py 的 _download），
+     同名 = 同内容，永远不会变，所以可以放心长期缓存。
+   ★ 只增不减：一张图最多几百 KB，且只活在当前页面会话里，刷新就没了。 */
+MSG.IMG = {};        // 文件名 → 已经取到的 blob 地址
+MSG.IMG_WAIT = {};   // 文件名 → 正在取的 Promise（同一张图别并发拉好几遍）
+
+function msgLoadImages(){
+  var list = document.querySelectorAll('#msgStream img[data-name]:not([src])');
+  Array.prototype.forEach.call(list, function(img){
+    var name = img.getAttribute('data-name');
+    // 已经缓存过 → 直接显示，一次网络请求都不发
+    if(MSG.IMG[name]){ img.src = MSG.IMG[name]; return; }
+    var p = MSG.IMG_WAIT[name];
+    if(!p){
+      p = fetch('/api/archive/' + MSG.BID + '/media/' + encodeURIComponent(name),
+                {headers: apiHeaders()})
+        .then(function(r){ if(!r.ok) throw new Error(r.status); return r.blob(); })
+        .then(function(b){
+          MSG.IMG[name] = URL.createObjectURL(b);
+          delete MSG.IMG_WAIT[name];
+          return MSG.IMG[name];
+        })
+        .catch(function(e){ delete MSG.IMG_WAIT[name]; throw e; });
+      MSG.IMG_WAIT[name] = p;
+    }
+    p.then(function(u){
+      // 取的过程中页面可能又重画了，这个元素已经不在页面上 ——
+      // 赋值也只是白做，不报错（缓存里已经有了，下次直接命中）
+      img.src = u;
+    }).catch(function(){
+      if(img.parentNode) img.replaceWith(document.createTextNode('[图片打不开]'));
+    });
+  });
+}
+
+function msgStartLive(){
+  msgStopLive();
+  MSG.TIMER = setInterval(msgPoll, 3000);
+}
+
+function msgStopLive(){
+  if(MSG.TIMER){ clearInterval(MSG.TIMER); MSG.TIMER = null; }
+}
+
+/* ★ 一个定时器管三级：看哪一级就刷哪一级。
+   三级各跑一个定时器的话，切来切去会堆一堆没用的轮询。 */
+function msgPoll(){
+  if(CUR_TAB !== 'msg' || document.hidden) return;
+  if(MSG.LEVEL === 1){ msgLoadBots(true); return; }
+  if(MSG.LEVEL === 2){ if(MSG.BID) msgOpenBot(MSG.BID, true); return; }
+  if(MSG.LEVEL === 3){ msgTick(); return; }
+}
+
+function msgTick(){
+  if(!MSG.BID || !MSG.CHAT || MSG.BUSY) return;
+  MSG.BUSY = true;
+  api('/api/archive/' + MSG.BID + '/since?limit=200&after='
+      + encodeURIComponent(MSG.CURSOR || ''))
+    .then(function(d){
+      if(!d.ok) return;
+      if(d.newest && d.newest > MSG.CURSOR) MSG.CURSOR = d.newest;
+      var mine = (d.messages || []).filter(function(m){
+        return String(m.chat_id) === String(MSG.CHAT)
+            && !MSG.SEEN[m.chat_id + '|' + m.message_id];
+      });
+      if(!mine.length) return;
+      mine.forEach(function(m){ MSG.SEEN[m.chat_id + '|' + m.message_id] = 1; });
+      var box = document.getElementById('msgStream');
+      if(!box) return;
+      if(box.querySelector('.empty')) box.innerHTML = '';
+      box.insertAdjacentHTML('beforeend',
+        mine.slice().reverse().map(msgBubble).join(''));
+      // ★★ 只有你本来就贴着底部时才自动滚下去。
+      //    不判断的话，每 3 秒轮询一来就把你从老消息那儿硬拽到底部 ——
+      //    手机上就是「滑一下被弹回去」那种晃动。
+      if(msgNearBottom()) msgScrollBottom();
+      msgLoadImages();
+      var seen = msgSeen(MSG.BID);
+      seen[String(MSG.CHAT)] = MSG.CURSOR;
+      msgSaveSeen(MSG.BID, seen);
+    }).catch(function(){}).then(function(){ MSG.BUSY = false; });
+}
+
+/* ---- 面包屑导航 ----
+   ★★ 切到哪一级就**立刻重画那一级** —— 光切显隐的话，
+      看到的是上次渲染留下的旧数据（比如刚读完消息、返回群列表，
+      还挂着「未读 8」）。之前就是漏了这个，等 3 秒轮询才刷新。
+      skipLoad 给 msgOpenBot 自己用，免得它调 msgGoto 时又回头调自己。 */
+function msgGoto(level, skipLoad){
+  var l1 = document.getElementById('msgLv1');
+  var l2 = document.getElementById('msgLv2');
+  var l3 = document.getElementById('msgLv3');
+  if(!l1) return;
+  MSG.LEVEL = level;
+  l1.style.display = (level === 1) ? '' : 'none';
+  l2.style.display = (level === 2) ? '' : 'none';
+  l3.style.display = (level === 3) ? '' : 'none';
+  if(level === 1){
+    MSG.BID = ''; MSG.CHAT = ''; MSG.CURSOR = '';
+    msgLoadBots();
+  } else if(level === 2 && !skipLoad && MSG.BID){
+    msgOpenBot(MSG.BID, true);
+  }
+  // ★ 看群消息时把整页切成「全屏聊天」：手机上没有多余的边距、
+  //   底部不留空，聊天区吃满剩下的高度
+  document.body.classList.toggle('chatting', level === 3);
+  // 三级都要实时 —— 未读数字、新群、新消息都得自己冒出来
+  msgStartLive();
+}
+
+</script>
+</body>
+</html>

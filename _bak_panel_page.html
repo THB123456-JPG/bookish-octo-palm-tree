@@ -1,0 +1,1240 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TG 机器人管理面板</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,"Microsoft YaHei",sans-serif;background:#0f1420;color:#e6edf3;padding:24px}
+.wrap{max-width:1180px;margin:0 auto}
+h1{font-size:20px;margin-bottom:4px}
+.sub{color:#7d8590;font-size:13px;margin-bottom:20px}
+.card{background:#161b26;border:1px solid #26303f;border-radius:10px;padding:18px;margin-bottom:18px}
+.card h2{font-size:15px;margin-bottom:12px;color:#c9d1d9;font-weight:600}
+.card h2 .cnt{color:#7d8590;font-weight:400;font-size:13px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+input,select{background:#0d1117;border:1px solid #30363d;color:#e6edf3;padding:9px 12px;border-radius:7px;font-size:14px;outline:none;font-family:inherit}
+input:focus,select:focus{border-color:#2f81f7}
+#note{width:150px}#token{flex:1;min-width:220px}
+#type{width:130px}#duration{width:110px}
+button{background:#238636;border:none;color:#fff;padding:9px 18px;border-radius:7px;font-size:14px;cursor:pointer;font-family:inherit}
+button:hover{background:#2ea043}
+button.gray{background:#21262d;border:1px solid #30363d;color:#c9d1d9}
+button.gray:hover{background:#30363d}
+button.red{background:#8b2c2c}
+button.red:hover{background:#a33}
+button.sm{padding:5px 11px;font-size:12.5px}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th{text-align:left;color:#7d8590;font-weight:500;padding:9px 10px;border-bottom:1px solid #26303f;white-space:nowrap}
+td{padding:11px 10px;border-bottom:1px solid #1d2531;vertical-align:middle}
+tr:last-child td{border-bottom:none}
+.code{font-family:Consolas,monospace;background:#0d1117;border:1px dashed #3d4757;padding:3px 9px;border-radius:6px;font-size:13px;color:#e3b341;letter-spacing:1px;cursor:pointer}
+.code:hover{border-color:#e3b341}
+.tag{display:inline-block;padding:2px 9px;border-radius:20px;font-size:12px}
+.ok{background:#12261e;color:#3fb950;border:1px solid #1f6f3f}
+.wait{background:#2b2413;color:#d29922;border:1px solid #6b5518}
+.err{background:#2d1618;color:#f85149;border:1px solid #7a2b2b}
+.off{background:#21262d;color:#7d8590;border:1px solid #30363d}
+.muted{color:#7d8590;font-size:12px;margin-top:3px}
+.empty{text-align:center;color:#7d8590;padding:28px 0}
+.hint{background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:12px 14px;font-size:13px;line-height:1.8;color:#9aa5b1;margin-bottom:14px}
+.hint code{background:#1c2430;padding:1px 6px;border-radius:4px;color:#e3b341;font-family:Consolas,monospace}
+#mask{position:fixed;inset:0;background:#0f1420;display:flex;align-items:center;justify-content:center;z-index:99}
+#mask .box{background:#161b26;border:1px solid #26303f;border-radius:12px;padding:28px;width:340px;text-align:center}
+#mask input{width:100%;margin:14px 0;text-align:center;letter-spacing:2px}
+#mask button{width:100%}
+#toast{position:fixed;bottom:26px;left:50%;transform:translateX(-50%);background:#21262d;border:1px solid #30363d;padding:11px 22px;border-radius:8px;font-size:14px;display:none;z-index:100;max-width:80vw;text-align:center}
+#extModal,#shopCfgModal,#ledgerCfgModal,#orderModal,#chpassModal,#tokenModal,#assignModal{position:fixed;inset:0;background:rgba(8,11,17,.82);display:flex;align-items:center;justify-content:center;z-index:101}
+#extModal .box,#shopCfgModal .box,#ledgerCfgModal .box,#orderModal .box,#chpassModal .box,#tokenModal .box,#assignModal .box{background:#161b26;border:1px solid #26303f;border-radius:12px;padding:24px;width:380px;max-width:94vw}
+#extModal h3,#shopCfgModal h3,#ledgerCfgModal h3,#orderModal h3,#chpassModal h3,#tokenModal h3,#assignModal h3{font-size:16px}
+#chpassModal input,#tokenModal input{width:100%;margin:10px 0}
+#chpassModal button,#tokenModal button{width:100%}
+#extOpts button{min-width:88px}
+.cfgrow{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.cfgrow label{width:130px;color:#9aa5b1;font-size:13px;flex:none}
+.cfgrow input,.cfgrow select{flex:1}
+.cfgrow .muted{flex:none;width:auto}
+.ordtbl td{font-size:12.5px}
+.ordtbl .sm{padding:3px 8px;font-size:11.5px}
+details.card>summary{cursor:pointer;font-size:15px;font-weight:600;color:#c9d1d9;list-style:none;outline:none}
+details.card>summary::-webkit-details-marker{display:none}
+details.card>summary::before{content:'▸ ';color:#7d8590}
+details.card[open]>summary::before{content:'▾ '}
+details.card[open]>summary{margin-bottom:14px}
+pre.tut{background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:16px;font-size:13px;line-height:1.75;color:#c9d1d9;white-space:pre-wrap;word-break:break-word;font-family:"Microsoft YaHei",Consolas,monospace;max-height:420px;overflow:auto;margin-top:12px}
+</style>
+</head>
+<body>
+
+<div id="mask"><div class="box">
+  <h1>🔐 管理面板</h1>
+  <div class="sub">管理员只填密码；商户填账号 + 密码</div>
+  <input id="user" placeholder="账号（管理员留空）" onkeydown="if(event.key==='Enter')login()">
+  <input id="pw" type="password" placeholder="密码" onkeydown="if(event.key==='Enter')login()">
+  <button onclick="login()">进入</button>
+</div></div>
+
+<div class="wrap" id="main" style="display:none">
+  <h1>🤖 TG 机器人管理面板 <span id="whoami" class="muted" style="font-size:14px"></span></h1>
+  <div class="sub">添加机器人 → 生成绑定码 → 发给使用者 → 他在 Telegram 里发给机器人即可</div>
+
+  <div class="card" id="card-add">
+    <h2>➕ 添加机器人</h2>
+    <div class="row">
+      <select id="type">
+        <option value="kefu">客服机器人</option>
+        <option value="usdt">USDT 助手</option>
+        <option value="shop">商城机器人</option>
+        <option value="ledger">记账机器人</option>
+      </select>
+      <select id="duration"></select>
+      <input id="note" placeholder="备注（例如：张三-售后）">
+      <input id="token" placeholder="机器人 token（BotFather 给的那串）">
+      <button onclick="addBot()">添加</button>
+    </div>
+    <div class="muted" id="typeHint">添加后系统会自动验证 token，并生成一个绑定码</div>
+  </div>
+
+  <div class="card" id="card-merch">
+    <h2>👥 商户管理 <span class="cnt" id="cnt-merch"></span></h2>
+    <div class="hint">
+      给客户开个账号 → 把机器人分给他 → 他自己登录 <code>/m</code> 配自己的上游 Key、收款地址和价格。<br>
+      <b>他只能看到自己名下的机器人</b>，看不到你的、也看不到别人的。
+    </div>
+    <div class="row">
+      <input id="m_name" placeholder="客户名字（例如：张三）">
+      <input id="m_user" placeholder="登录账号（小写字母数字下划线，3~20位）">
+      <button onclick="addMerch()">➕ 新建商户</button>
+    </div>
+    <div id="merch-new" class="muted" style="margin-top:8px"></div>
+    <div id="list-merch" style="margin-top:12px"></div>
+  </div>
+
+  <details class="card" id="tut">
+    <summary>📖 新手教程 —— 复制发给不会建机器人的朋友</summary>
+    <div class="row" style="margin-bottom:4px">
+      <button onclick="copyTut(TUT)">📋 复制整段教程</button>
+      <button class="gray" onclick="copyTut(TUT_MAKE)">📋 只复制「建机器人拿token」那段</button>
+    </div>
+    <div class="muted">复制后直接粘贴发给朋友，他照着做就行</div>
+    <pre class="tut" id="tut"></pre>
+  </details>
+
+  <div class="card" id="merch-empty" style="display:none">
+    <h2>👋 欢迎</h2>
+    <div class="hint">
+      你名下还没有机器人。<br>
+      请联系管理员给你分配，分配好之后刷新本页就能看到。
+    </div>
+  </div>
+
+  <div class="card" id="card-ledger">
+    <h2>📒 记账机器人 <span class="cnt" id="cnt-ledger"></span></h2>
+    <div class="hint">
+      群里记账：成员发 <code>+100 张三</code> 就记一笔，发 <code>账单</code> 出账。<br>
+      ⚠️ <b>第一步必须关掉 Group Privacy</b>（不关的话收不到群里的普通消息，记账会全废）：<br>
+      　　<b>@BotFather → /mybots → 选机器人 → Bot Settings → Group Privacy → Turn off</b><br>
+      　　关完<b>把机器人踢出群、再重新拉一次</b>，否则设置不生效。<br>
+      　　客户版说明见项目里的 <code>记账机器人_客户使用说明.txt</code>，可直接转发。
+    </div>
+    <div id="list-ledger"><div class="empty">加载中…</div></div>
+  </div>
+
+  <!-- 📜 群消息记录入口 —— 就放在记账机器人后面（只有管理员看得见）。
+       ★ 点进去是独立页面：选机器人、开关记录、看消息**全在那边**，
+         面板这边不再重复一套界面 -->
+  <div class="card" id="card-arc" style="padding:14px 18px;display:none">
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      <div style="flex:1;min-width:220px">
+        <b>📜 群消息记录</b>
+        <span class="muted" id="arcCnt"></span>
+        <div class="muted">
+          把群里的消息记在<b>你自己电脑上</b>，随时翻、随时搜。只有管理员能看。<br>
+          支持<b>记账机器人</b>和<b>客服机器人</b>；开关和保留天数都在里面设。
+        </div>
+      </div>
+      <button onclick="arcOpenAll()">打开记录 →</button>
+    </div>
+  </div>
+
+  <div class="card" id="card-kefu">
+    <h2>📨 客服机器人 <span class="cnt" id="cnt-kefu"></span></h2>
+    <div class="hint">
+      客户私聊机器人 → 消息转发到<b>你自己的 Telegram</b> → 你回复那条消息 → 自动发给客户。<br>
+      使用者在 Telegram 里给机器人发 <code>/admin 绑定码</code> 完成绑定。
+    </div>
+    <div id="list-kefu"><div class="empty">加载中…</div></div>
+  </div>
+
+  <div class="card" id="card-usdt">
+    <h2>💰 USDT 助手 <span class="cnt" id="cnt-usdt"></span></h2>
+    <div class="hint">
+      绑定后机器人会自动带出底部菜单：<b>📡 地址监听 · 🔍 查U交易 · 💱 查U汇率 · 🗂 地址管理 · 👥 操作人</b><br>
+      也可以直接发 TRC20 地址查询（返回余额 + 最近交易），或发 <code>/watch 地址 备注</code> 添加监听。<br>
+      汇率来自<b>欧易(OKX)场外商家的实时挂单价</b>。<br>
+      <b>注意</b>：只有 USDT 的普通转账会被推送（过滤掉授权等操作）；刚添加监听时先建基线，不会把历史交易推一遍。
+    </div>
+    <div id="list-usdt"><div class="empty">加载中…</div></div>
+  </div>
+
+  <div class="card" id="card-shop">
+    <h2>🛒 商城机器人 <span class="cnt" id="cnt-shop"></span></h2>
+    <div class="hint">
+      <b>能量自助充值</b>：客户从自己钱包转 TRX 到你的收款地址，
+      系统自动把能量发给<b>转账的那个地址</b>。<br>
+      客户<b>不需要登记地址</b>、不需要在机器人里下单，转了就发货 —— 也就不存在「发错人」的问题。<br>
+      <b>必须先配「收款地址」</b>，点「⚙️ 配置」填写。<br>
+      ⚠️ 客户必须从<b>自己的钱包</b>转。从交易所直接转的话，能量会发到交易所地址上（白送）。
+    </div>
+    <div id="list-shop"><div class="empty">加载中…</div></div>
+  </div>
+</div>
+
+<div id="shopCfgModal" style="display:none">
+  <div class="box" style="width:520px">
+    <h3 id="cfgTitle">商城配置</h3>
+    <div id="cfgBody" style="margin:14px 0;max-height:60vh;overflow:auto"></div>
+    <div class="row" style="justify-content:flex-end">
+      <button class="gray" onclick="closeCfg()">取消</button>
+      <button onclick="saveCfg()">保存</button>
+    </div>
+  </div>
+</div>
+
+<div id="ledgerCfgModal" style="display:none">
+  <div class="box" style="width:560px">
+    <h3 id="ledTitle">📒 记账配置</h3>
+    <div id="ledBody" style="margin:14px 0;max-height:60vh;overflow:auto"></div>
+    <div class="row" style="justify-content:flex-end">
+      <button class="gray" onclick="closeLed()">取消</button>
+      <button onclick="saveLed()">保存</button>
+    </div>
+  </div>
+</div>
+
+<div id="orderModal" style="display:none">
+  <div class="box" style="width:820px">
+    <h3 id="ordTitle">订单</h3>
+    <div class="muted" style="margin:8px 0 14px" id="ordSub"></div>
+    <div id="ordBody" style="max-height:62vh;overflow:auto"></div>
+    <button class="gray" style="width:100%;margin-top:16px" onclick="closeOrd()">关闭</button>
+  </div>
+</div>
+
+<div id="extModal" style="display:none">
+  <div class="box">
+    <h3 id="extTitle">续期</h3>
+    <div class="muted" style="margin:8px 0 16px">选一个时长，从「现在」开始重新计算到期时间</div>
+    <div id="extOpts" class="row" style="justify-content:center"></div>
+    <button class="gray" style="width:100%;margin-top:18px" onclick="closeExt()">取消</button>
+  </div>
+</div>
+
+<div id="chpassModal" style="display:none">
+  <div class="box">
+    <h3>🔑 修改密码</h3>
+    <div class="muted" style="margin:8px 0 16px" id="chpassHint">为了安全，请先把初始密码改掉</div>
+    <input id="cp_old" type="password" placeholder="原密码">
+    <input id="cp_new" type="password" placeholder="新密码（至少 6 位，别纯数字">
+    <input id="cp_new2" type="password" placeholder="再输一遍新密码"
+           onkeydown="if(event.key==='Enter')doChpass()">
+    <button onclick="doChpass()">确定修改</button>
+    <button class="gray" id="cpCancel" style="width:100%;margin-top:8px"
+            onclick="closeChpass()">先不改</button>
+  </div>
+</div>
+
+<div id="tokenModal" style="display:none">
+  <div class="box">
+    <h3 id="tkTitle">换机器人 Token</h3>
+    <div class="muted" style="margin:8px 0 16px">
+      填 BotFather 给的那串。<b>换完记得新机器人里重新发绑定码</b>。
+    </div>
+    <input id="tk_val" placeholder="123456789:AAE...">
+    <button onclick="saveToken()">保存</button>
+    <button class="gray" style="width:100%;margin-top:8px"
+            onclick="closeToken()">取消</button>
+  </div>
+</div>
+
+<div id="assignModal" style="display:none">
+  <div class="box" style="width:640px">
+    <h3 id="asTitle">分配机器人</h3>
+    <div class="muted" style="margin:8px 0 14px">
+      勾上的划给他，取消勾的收回来。<br>
+      ⚠️ 划过去时<b>会自动清空收款地址和上游 Key</b> —— 那本来是你的，
+      不清的话他一进去就看见了。
+    </div>
+    <div id="asBody" style="max-height:55vh;overflow:auto"></div>
+    <div class="row" style="justify-content:flex-end;margin-top:16px">
+      <button class="gray" onclick="closeAssign()">取消</button>
+      <button onclick="doAssign()">确定</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// /m 是给客户的商户入口，和 / 用同一份页面
+var IS_M = location.pathname.indexOf('/m') === 0;
+var PW = localStorage.getItem(IS_M ? 'm_pw' : 'panel_pw') || '';
+var TOK = localStorage.getItem(IS_M ? 'm_token' : 'panel_token') || '';
+var ME = {role:'admin'};          // 当前身份，登录后由服务端告诉我们
+
+// 登录页按入口显示不同的话术
+if(IS_M){
+  document.addEventListener('DOMContentLoaded', function(){
+    var h = document.querySelector('#mask h1');
+    var s = document.querySelector('#mask .sub');
+    if(h) h.textContent = '🏪 商户后台';
+    if(s) s.textContent = '用你的账号和密码登录';
+  });
+  document.title = '商户后台';
+}
+
+function toast(msg){
+  var t=document.getElementById('toast');
+  t.textContent=msg; t.style.display='block';
+  clearTimeout(t._h); t._h=setTimeout(function(){t.style.display='none';},3000);
+}
+
+// 页面上任何脚本报错都要看得见 —— 不然就是「点了没反应」，没法排查
+window.onerror = function(m, src, line){
+  try{ toast('页面出错：' + m + '（第 ' + line + ' 行）'); }catch(e){}
+  return false;
+};
+
+function api(path, opts){
+  opts = opts || {};
+  var h = {'Content-Type':'application/json'};
+  if(TOK) h['X-Panel-Token'] = TOK;     // 商户：签过名的 token
+  if(PW)  h['X-Panel-Pass']  = PW;      // 管理员：原来的密码头
+  opts.headers = Object.assign(h, opts.headers||{});
+  return fetch(path, opts).then(function(r){
+    if(r.status===401){
+      // 把服务端的具体原因显示出来（可能是「密码错误次数过多，已锁定」）
+      return r.json().then(function(d){
+        logout(d && d.error ? d.error : '登录已过期');
+        throw new Error('401');
+      }).catch(function(e){
+        if(!(e instanceof Error) || e.message!=='401') logout('登录已过期');
+        throw new Error('401');
+      });
+    }
+    if(r.status===403){
+      // 没改初始密码：弹改密码框，但别把他登出
+      return r.json().then(function(d){
+        if(d && d.code==='must_change'){ openChpass(true); }
+        return d;
+      });
+    }
+    return r.json();
+  });
+}
+
+function login(){
+  var u = ((document.getElementById('user')||{}).value||'').trim();
+  var p = document.getElementById('pw').value.trim();
+  if(!p){ toast('请输入密码'); return; }
+
+  if(!u){
+    // 管理员：用户名留空，走老的密码头
+    PW = p; TOK = '';
+    api('/api/bots').then(function(d){
+      _setLS('pw', PW); _setLS('token', '');
+      startUI(d);
+    }).catch(function(){ toast('密码不对'); });
+    return;
+  }
+  // 商户
+  api('/api/login', {method:'POST', body:JSON.stringify({user:u, pass:p})})
+    .then(function(d){
+      if(!d || !d.ok){ toast((d&&d.error)||'登录失败'); return; }
+      TOK = d.token || ''; PW = '';
+      _setLS('token', TOK); _setLS('pw', '');
+      if(d.must_change){ openChpass(true); return; }
+      api('/api/bots').then(startUI).catch(function(){});
+    }).catch(function(){ toast('登录失败'); });
+}
+
+// ★ / 和 /m 各存各的登录态，互不串门
+function _setLS(k, v){
+  var key = (IS_M ? 'm_' : 'panel_') + k;
+  if(v) localStorage.setItem(key, v);
+  else localStorage.removeItem(key);
+}
+
+function startUI(d){
+  if(!d || !d.ok) return;
+  document.getElementById('mask').style.display='none';
+  document.getElementById('main').style.display='block';
+  applyRole(d.me);
+  render(d);
+  if(!window._poll){ window._poll = setInterval(refresh, 5000); }
+}
+
+function logout(msg){
+  _setLS('pw', ''); _setLS('token', '');
+  PW = ''; TOK = '';
+  document.getElementById('mask').style.display='flex';
+  document.getElementById('main').style.display='none';
+  if(msg) toast(msg);
+}
+
+/* ---------- 身份：管理员 vs 商户 ---------- */
+function applyRole(me){
+  ME = me || {role:'admin'};
+  var admin = ME.role === 'admin';
+  // 管理员专属的区块
+  ['card-add','card-merch','tut'].forEach(function(id){
+    var el = document.getElementById(id);
+    if(el) el.style.display = admin ? '' : 'none';
+  });
+  var who = document.getElementById('whoami');
+  if(who){
+    who.textContent = admin ? '管理员'
+      : ('商户：' + (ME.name || ME.user || ''));
+    who.style.display = '';
+  }
+  document.title = admin ? 'TG 机器人管理面板' : '商户后台';
+}
+
+function esc(s){
+  return String(s==null?'':s).replace(/[&<>"']/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+
+function statusTag(b){
+  if(b.expired) return '<span class="tag err">已到期</span>';
+  if(!b.enabled) return '<span class="tag off">已停用</span>';
+  if(b.status==='running') return '<span class="tag ok">● 运行中</span>';
+  if(b.status==='starting') return '<span class="tag wait">启动中</span>';
+  if(b.status==='conflict') return '<span class="tag err">冲突</span>';
+  if(b.status==='error') return '<span class="tag err">出错</span>';
+  return '<span class="tag off">已停止</span>';
+}
+
+function fmtDate(ts){
+  var d=new Date(ts*1000);
+  return (d.getMonth()+1)+'/'+d.getDate()+' '+('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);
+}
+
+// 到期这一列：永久 / 剩 N 天 / 已过期（还能救几天）
+function expireCell(b){
+  if(!b.expire_at) return '<span style="color:#7d8590">永久</span>';
+  if(b.expired){
+    var left = b.delete_at ? Math.max(0, Math.ceil(b.delete_at - Date.now()/1000)) : 0;
+    var d = Math.floor(left/86400), hh = Math.floor((left%86400)/3600);
+    return '<span class="tag err">已过期</span>'
+      +'<div class="muted">'+(d>0? d+' 天 ':'')+hh+' 小时后删除</div>';
+  }
+  var days = Math.ceil(b.remain_sec/86400);
+  var color = days<=1 ? '#f85149' : (days<=3 ? '#d29922' : '#3fb950');
+  return '<span style="color:'+color+'">剩 '+days+' 天</span>'
+    +'<div class="muted">'+fmtDate(b.expire_at)+' 到期</div>';
+}
+
+function renderTable(bots, target, statLabel, extra){
+  var el=document.getElementById(target);
+  if(!bots.length){ el.innerHTML='<div class="empty">还没有添加</div>'; return; }
+  var h='<table><tr><th>备注</th><th>机器人</th><th>绑定码</th><th>使用者</th><th>状态</th><th>到期</th><th>'+statLabel+'</th><th>操作</th></tr>';
+  bots.forEach(function(b){
+    var ops = (b.admin_count || 0) > 1
+      ? '<div class="muted">+ '+(b.admin_count-1)+' 个操作人</div>' : '';
+    var bound = b.bound
+      ? '<span style="color:#3fb950">✅ '+esc(b.admin_name)+'</span>'
+        +'<div class="muted">ID:'+esc(b.admin_id)+'</div>'+ops
+      : '<span style="color:#d29922">⏳ 等待绑定</span>';
+    h+='<tr>'
+      +'<td><b>'+esc(b.note)+'</b><div class="muted">'+esc(b.created)+'</div></td>'
+      +'<td>@'+esc(b.username)+'<div class="muted">'+esc(b.name)+'</div></td>'
+      +'<td><span class="code" onclick="copyCode(\''+esc(b.bind_code)+'\')" title="点击复制">'+esc(b.bind_code)+'</span></td>'
+      +'<td>'+bound+'</td>'
+      +'<td>'+statusTag(b)+(b.error?'<div class="muted" style="max-width:180px;word-break:break-all">'+esc(b.error)+'</div>':'')+'</td>'
+      +'<td>'+expireCell(b)+'</td>'
+      +'<td>'+b.stat+'</td>'
+      +'<td style="white-space:nowrap">'
+        + (ME.role === 'admin'
+            ? ((b.expired
+                ? '<button class="sm" onclick="openExt(\''+b.id+'\',\''+esc(b.note)+'\')">续期恢复</button> '
+                : (b.enabled
+                    ? '<button class="gray sm" onclick="act(\''+b.id+'\',\'disable\')">停用</button> '
+                    : '<button class="sm" onclick="act(\''+b.id+'\',\'enable\')">启用</button> ')
+                  +'<button class="gray sm" onclick="openExt(\''+b.id+'\',\''+esc(b.note)+'\')">续期</button> ')
+              +'<button class="gray sm" onclick="act(\''+b.id+'\',\'newcode\')">换绑定码</button> '
+              +(extra ? extra(b) : '')
+              +'<button class="gray sm" onclick="openToken(\''+b.id+'\',\''+esc(b.note)+'\')">🔑 Token</button> '
+              +'<button class="red sm" onclick="delBot(\''+b.id+'\',\''+esc(b.note)+'\')">删除</button>')
+            // 商户：只能配自己的、看订单、换自己的 token
+            : ((extra ? extra(b) : '')
+               +'<button class="gray sm" onclick="openToken(\''+b.id+'\',\''+esc(b.note)+'\')">🔑 Token</button>'))
+      +'</td></tr>';
+  });
+  el.innerHTML = h+'</table>';
+}
+
+var DURATIONS = [];
+var GRACE = 7;
+
+function render(data){
+  DURATIONS = data.durations || [];
+  GRACE = data.grace_days || 7;
+  // 首次拿到时长选项就填进下拉框
+  var sel = document.getElementById('duration');
+  if(sel && !sel.options.length){
+    DURATIONS.forEach(function(d){
+      var o=document.createElement('option');
+      o.value=d.value; o.textContent=d.label;
+      if(d.value==='forever') o.selected=true;
+      sel.appendChild(o);
+    });
+  }
+  var all = data.bots || [];
+  var kefu = all.filter(function(b){ return b.type==='kefu'; });
+  var usdt = all.filter(function(b){ return b.type==='usdt'; });
+  var shop = all.filter(function(b){ return b.type==='shop'; });
+  var ledger = all.filter(function(b){ return b.type==='ledger'; });
+  // ★ 开/关记录挪到记录页面里去了（那儿能选机器人，顺手就能开关）。
+  //   面板上只留一个入口标签，见下面的 card-arc。
+  renderTable(kefu, 'list-kefu', '客户');
+  renderTable(usdt, 'list-usdt', '监听地址');
+  renderTable(ledger, 'list-ledger', '记账群', function(b){
+    return '<button class="gray sm" onclick="openLed(\''+b.id+'\',\''+esc(b.note)+'\')">⚙️ 配置</button> ';
+  });
+  renderTable(shop, 'list-shop', '待处理', function(b){
+    return '<button class="gray sm" onclick="openCfg(\''+b.id+'\',\''+esc(b.note)+'\')">⚙️ 配置</button> '
+         + '<button class="gray sm" onclick="openOrd(\''+b.id+'\',\''+esc(b.note)+'\')">📋 订单'
+           + (b.stat ? ' ('+b.stat+')' : '') + '</button> ';
+  });
+  // 「📜 群消息记录」入口：只有管理员看得见（在记账机器人卡片下面）
+  var admin = ME.role === 'admin';
+  var arcCard = document.getElementById('card-arc');
+  if(arcCard) arcCard.style.display = admin ? '' : 'none';
+  // ★ 商户只显示他名下真正有的那类机器人，空卡片直接藏起来
+  //   （管理员保持原样：几类都显示，空的就说「还没有添加」，方便他随时加）
+  [['card-kefu', kefu], ['card-usdt', usdt], ['card-shop', shop],
+   ['card-ledger', ledger]]
+    .forEach(function(pair){
+      var el = document.getElementById(pair[0]);
+      if(el) el.style.display = (admin || pair[1].length) ? '' : 'none';
+    });
+  // 商户一台都没有时别让他对着空白页发懵
+  var em = document.getElementById('merch-empty');
+  if(em) em.style.display = (!admin && !all.length) ? '' : 'none';
+
+  document.getElementById('cnt-kefu').textContent = kefu.length ? '（'+kefu.length+' 个）' : '';
+  document.getElementById('cnt-usdt').textContent = usdt.length ? '（'+usdt.length+' 个）' : '';
+  document.getElementById('cnt-shop').textContent = shop.length ? '（'+shop.length+' 个）' : '';
+  document.getElementById('cnt-ledger').textContent = ledger.length ? '（'+ledger.length+' 个）' : '';
+  // 入口上带个「几个在记录」的小提示
+  var nArc = all.filter(function(b){
+    return ARCHIVE_TYPES.indexOf(b.type) >= 0 && (b.archive||{}).enabled;
+  }).length;
+  var arcCnt = document.getElementById('arcCnt');
+  if(arcCnt) arcCnt.textContent = nArc ? ('（' + nArc + ' 个在记录）') : '';
+}
+
+/* ---------- 商城：配置弹窗 ---------- */
+var cfgId = null, cfgProviders = [];
+
+function openCfg(id, note){
+  cfgId = id;
+  document.getElementById('cfgTitle').textContent = '⚙️ 商城配置 —— ' + note;
+  document.getElementById('cfgBody').innerHTML = '<div class="empty">加载中…</div>';
+  document.getElementById('shopCfgModal').style.display = 'flex';
+  api('/api/shop/'+id+'/config').then(function(d){
+    if(!d.ok){ document.getElementById('cfgBody').innerHTML = '<div class="empty">'+esc(d.error)+'</div>'; return; }
+    cfgProviders = d.providers || [];
+    var c = d.config || {};
+    var h = '';
+    h += '<div class="cfgrow"><label>总开关</label><select id="c_en">'
+       + '<option value="1"'+(c.enabled!==false?' selected':'')+'>开启</option>'
+       + '<option value="0"'+(c.enabled===false?' selected':'')+'>关闭</option></select></div>';
+    h += '<div class="cfgrow"><label>收款地址</label><input id="c_pay" value="'+esc(c.trx_own||'')+'" placeholder="TRX 地址，客户往这里转 TRX（必填）"></div>';
+    if(!c.trx_own){ h += '<div class="muted" style="color:#d29922;margin:-4px 0 10px 140px">没填收款地址，客户点「充能量」会提示没配置</div>'; }
+    h += '<div class="cfgrow"><label>单价(TRX)</label><input id="c_price" value="'+esc(c.price)+'"><span class="muted">一个单位多少 TRX</span></div>';
+    h += '<div class="cfgrow"><label>单位能量</label><input id="c_energy" value="'+esc(c.energy)+'"><span class="muted">一个单位发多少能量</span></div>';
+    h += '<div class="cfgrow"><label>最高倍数</label><input id="c_max" value="'+esc(c.max)+'"><span class="muted">超过只按这个倍数发，多出的要人工处理</span></div>';
+    var opts = cfgProviders.map(function(p){
+      return '<option value="'+esc(p.value)+'"'+(p.value===c.provider?' selected':'')+'>'+esc(p.label)+'</option>';
+    }).join('');
+    h += '<div class="cfgrow"><label>能量上游</label><select id="c_prov">'+opts+'</select></div>';
+    h += '<div class="cfgrow"><label>上游 API Key</label><input id="c_key" value="'+esc(c.provider_key||'')+'" placeholder="选 mock 可留空（模拟，不真发能量）"></div>';
+    h += '<div class="cfgrow"><label></label><button type="button" onclick="testProv()">测试连接 / 查余额</button>'
+       + '<span class="muted" id="c_testmsg" style="margin-left:8px"></span></div>';
+    // 选「自定义上游」时才展开这一块 —— 客户照自己上游的文档填
+    h += '<div id="c_custom" style="display:'+((c.provider==='custom')?'':'none')+'">'
+       + '<div class="cfgrow"><label>接口地址</label>'
+       + '<input id="cu_url" value="'+esc(c.custom_url||'')+'" '
+       + 'placeholder="https://你的上游/buy?key={key}&amp;addr={addr}&amp;energy={energy}&amp;hour={hours}"></div>'
+       + '<div class="muted" style="margin:-4px 0 10px 140px;line-height:1.7">'
+       + '  把你自己上游文档里的接口照抄进来，参数值用占位符：<br>'
+       + '  <code>{key}</code> 你的 API Key　<code>{addr}</code> 收能量地址　'
+       + '<code>{energy}</code> 能量数　<code>{hours}</code> 小时数<br>'
+       + '  参数名按文档里的写（比如文档叫 <code>api_key</code> 就写 '
+       + '<code>api_key={key}</code>）'
+       + '</div>'
+       + '<div class="cfgrow"><label>请求方式</label><select id="cu_method">'
+       + '<option value="GET"'+((c.custom_method||'GET')==='GET'?' selected':'')+'>GET</option>'
+       + '<option value="POST"'+(c.custom_method==='POST'?' selected':'')+'>POST</option></select>'
+       + '<span class="muted">POST 时占位符还是写在地址里（参数拼在 URL 上）</span></div>'
+       + '<div class="cfgrow"><label>怎么算成功</label>'
+       + '<span class="muted">返回的</span>'
+       + '<input id="cu_okp" value="'+esc(c.custom_ok_path||'code')+'" style="width:150px" placeholder="code">'
+       + '<span class="muted">等于</span>'
+       + '<input id="cu_okv" value="'+esc(c.custom_ok_value||'200')+'" style="width:90px" placeholder="200">'
+       + '<span class="muted">就算下单成功</span></div>'
+       + '<div class="cfgrow"><label>订单号位置</label>'
+       + '<input id="cu_oid" value="'+esc(c.custom_order_path||'data.orderId')+'" placeholder="data.orderId">'
+       + '<span class="muted">订单号在返回 JSON 里的路径</span></div>'
+       + '<div class="muted" style="margin:6px 0 10px 140px">'
+       + '⚠️ 自定义上游查不了余额，「每单成本」要等第一笔发货后看日志里的实测扣费'
+       + '</div></div>';
+    var ap = c.auto_prices || {};
+    var apTxt = Object.keys(ap).sort(function(a,b){return a-b;})
+                  .map(function(k){ return k + ' ' + ap[k]; }).join('\n');
+    h += '<div class="cfgrow"><label>笔数套餐</label><select id="c_aen">'
+       + '<option value="1"'+(c.auto_enabled?' selected':'')+'>开启</option>'
+       + '<option value="0"'+(c.auto_enabled?'':' selected')+'>关闭</option></select>'
+       + '<span class="muted">买 N 笔，用一次扣一次（智能笔数：65k 算 1 笔，131k 算 2 笔）</span></div>';
+    h += '<div class="cfgrow"><label>笔数档位</label>'
+       + '<textarea id="c_ap" rows="5" placeholder="10 30&#10;50 140&#10;100 260&#10;300 750" '
+       + 'style="width:300px;font-family:monospace;'
+       + 'background:#0d1117;color:#e6edf3;border:1px solid #30363d;border-radius:6px;padding:6px">'
+       + esc(apTxt) + '</textarea>'
+       + '<span class="muted" style="margin-left:8px">每行一档，写「笔数 价格TRX」<br>'
+       + '上游只要 ≥2 笔都行，没上限 —— 你上游有 300 笔就写 300<br>'
+       + '成本价要去 @XXTrxBot 查</span></div>';
+    var pp = c.premium_prices || {};
+    var pk = (c.premium_key||'').trim();
+    h += '<div class="cfgrow"><label>会员功能</label><select id="c_pen">'
+       + '<option value="1"'+(c.premium_enabled?' selected':'')+'>开启</option>'
+       + '<option value="0"'+(c.premium_enabled?'':' selected')+'>关闭</option></select>'
+       + '<span class="muted">客户自助开 TG Premium</span></div>';
+    h += '<div class="cfgrow"><label>会员Key</label><input id="c_pkey" value="'+esc(c.premium_key||'')+'" placeholder="@GiftAPIBot 的 key（留空则和能量共用）"></div>';
+    h += '<div class="cfgrow"><label></label><span class="muted">'
+       + (pk ? '当前：<b style="color:#3fb950">USDT 计价</b>（走 gift 域名，独立账户，要预存 USDT）。<b>客户也付 USDT-TRC20</b> —— 同一个收款地址就能收，不用换汇。'
+             : '当前：<b>TRX 计价</b>（和能量共用余额，去 @XXTrxBot 开「会员API权限」）。客户付 TRX。')
+       + '</span></div>';
+    var _u = pk ? 'USDT' : 'TRX';
+    h += '<div class="cfgrow"><label>3个月('+_u+')</label><input id="c_p3" value="'+esc(pp['3']||0)+'"><span class="muted">上游成本 12.5 USDT</span></div>';
+    h += '<div class="cfgrow"><label>6个月('+_u+')</label><input id="c_p6" value="'+esc(pp['6']||0)+'"><span class="muted">上游成本 16.5 USDT</span></div>';
+    h += '<div class="cfgrow"><label>12个月('+_u+')</label><input id="c_p12" value="'+esc(pp['12']||0)+'"><span class="muted">上游成本 29.5 USDT</span></div>';
+    h += '<div class="cfgrow"><label>通知群ID</label><input id="c_group" value="'+esc(c.group_ids||'')+'" placeholder="可选，订单实时推到群，多个用逗号隔开"></div>';
+    h += '<div class="cfgrow"><label>客服联系方式</label><input id="c_contact" value="'+esc(c.contact||'')+'" placeholder="可选，如 @yourkefu"></div>';
+    h += '<div class="cfgrow"><label>顶部说明</label><input id="c_notice" value="'+esc(c.notice||'')+'" placeholder="可选，显示在充能量页面顶部"></div>';
+    h += '<div class="muted" style="margin-top:10px">'
+       + '★ 客户从自己钱包转 TRX 到收款地址，系统自动把能量发给<b>转账的那个地址</b>，不需要客户登记。'
+       + '</div>';
+    document.getElementById('cfgBody').innerHTML = h;
+    // 上游选到「自定义」时，才把那几个框展开
+    var pv = document.getElementById('c_prov');
+    if(pv) pv.onchange = function(){
+      var box = document.getElementById('c_custom');
+      if(box) box.style.display = (pv.value === 'custom') ? '' : 'none';
+    };
+  }).catch(function(){});
+}
+
+function closeCfg(){
+  cfgId = null;
+  document.getElementById('shopCfgModal').style.display = 'none';
+}
+
+/* ---------- 群消息记录（★ 管理端专属，商户端连按钮都不给）----------
+   开/关记录的按钮放在每种机器人**自己的那一行**上，不再单开一张卡片 ——
+   看记录统一去 /messages 那个独立页面（那页能切机器人）。
+   白名单三处必须一致：core.ARCHIVE_TYPES / 这里 / messages_page.html */
+var ARCHIVE_TYPES = ['ledger', 'kefu'];
+
+/* 记录入口 → 独立的记录页面。
+   ★ 开/关记录、选机器人、看消息**全在那个页面里**，面板这边不再重复一套
+   （之前面板有张卡片、后来又在每行加按钮，都是多余的） */
+function arcOpenAll(){
+  window.open('/messages', '_blank');
+}
+
+/* ---------- 记账：配置弹窗 ---------- */
+var ledId = null, ledDefault = '';
+
+function openLed(id, note){
+  ledId = id;
+  document.getElementById('ledTitle').textContent = '📒 记账配置 —— ' + note;
+  document.getElementById('ledBody').innerHTML = '<div class="empty">加载中…</div>';
+  document.getElementById('ledgerCfgModal').style.display = 'flex';
+  api('/api/ledger/'+id+'/config').then(function(d){
+    if(!d.ok){
+      document.getElementById('ledBody').innerHTML = '<div class="empty">'+esc(d.error)+'</div>';
+      return;
+    }
+    var c = d.config || {};
+    ledDefault = d.welcome_default || '';
+    var h = '';
+    h += '<div class="cfgrow"><label>总开关</label><select id="l_en">'
+       + '<option value="1"'+(c.enabled!==false?' selected':'')+'>开启</option>'
+       + '<option value="0"'+(c.enabled===false?' selected':'')+'>关闭</option></select>'
+       + '<span class="muted">关了机器人就不回消息</span></div>';
+    h += '<div class="cfgrow" style="align-items:flex-start"><label>入群欢迎语</label>'
+       + '<textarea id="l_wel" rows="8" style="flex:1" placeholder="留空 = 用默认欢迎语">'
+       + esc(c.welcome_text||'') + '</textarea></div>';
+    h += '<div class="muted" style="margin:-4px 0 10px 140px">'
+       + '机器人被拉进群时发的第一句话。留空用默认的那段。'
+       + '<a href="#" onclick="document.getElementById(\'l_wel\').value=ledDefault;return false">填入默认</a></div>';
+    h += '<div class="muted" style="margin:12px 0 0 0;padding:10px;background:#0d1117;border-radius:8px;line-height:1.7">'
+       + '<b>群里怎么用</b>（这些是<b>在群里发命令</b>设的，不在这儿配）：<br>'
+       + '<code>开启</code> / <code>关闭记账</code> · 记账总开关<br>'
+       + '<code>汇率 7.2</code> · <code>设置费率 10</code> · <code>日切3</code> · <code>查看费率</code><br>'
+       + '<code>添加操作员</code>（回复某人的消息）· <code>操作员</code> 看列表<br>'
+       + '<code>通知所有人 内容</code> · <code>/del</code> 清理消息 · <code>群成员</code><br>'
+       + '私聊机器人：<code>广播</code> 给多个群发通知 · <code>/del</code> 批量清理</div>';
+    document.getElementById('ledBody').innerHTML = h;
+  }).catch(function(){
+    document.getElementById('ledBody').innerHTML = '<div class="empty">加载失败</div>';
+  });
+}
+
+function closeLed(){
+  ledId = null;
+  document.getElementById('ledgerCfgModal').style.display = 'none';
+}
+
+function saveLed(){
+  if(!ledId) return;
+  var body = {
+    enabled: document.getElementById('l_en').value === '1',
+    welcome_text: document.getElementById('l_wel').value
+  };
+  api('/api/ledger/'+ledId+'/config',
+      {method:'POST', body:JSON.stringify(body)})
+  .then(function(d){
+    if(!d.ok){ toast(d.error || '保存失败'); return; }
+    toast('配置已保存');
+    closeLed();
+    refresh();
+  }).catch(function(){ toast('保存失败'); });
+}
+
+function testProv(){
+  if(!cfgId) return;
+  var msg = document.getElementById('c_testmsg');
+  msg.style.color = '';
+  msg.textContent = '测试中…';
+  // 用输入框里的值测，不用已保存的 —— 改完 key 可以先测再存
+  var body = {
+    provider: document.getElementById('c_prov').value,
+    provider_key: document.getElementById('c_key').value.trim(),
+    custom_url: (document.getElementById('cu_url')||{}).value
+                ? document.getElementById('cu_url').value.trim() : '',
+    custom_method: (document.getElementById('cu_method')||{}).value || 'GET',
+    custom_ok_path: (document.getElementById('cu_okp')||{}).value || 'code',
+    custom_ok_value: (document.getElementById('cu_okv')||{}).value || '200',
+    custom_order_path: (document.getElementById('cu_oid')||{}).value
+                       || 'data.orderId'
+  };
+  api('/api/shop/'+cfgId+'/providertest', {method:'POST', body:JSON.stringify(body)})
+    .then(function(d){
+      if(!d.ok){ msg.style.color = '#f85149'; msg.textContent = d.error||'测试失败'; return; }
+      msg.style.color = d.pass ? '#3fb950' : '#f85149';
+      msg.textContent = (d.pass?'✅ ':'❌ ') + d.msg;
+    }).catch(function(){ msg.style.color = '#f85149'; msg.textContent = '请求失败'; });
+}
+
+function saveCfg(){
+  if(!cfgId) return;
+  var id = cfgId;
+  var patch = {
+    enabled: document.getElementById('c_en').value==='1',
+    trx_own: document.getElementById('c_pay').value.trim(),
+    price: parseFloat(document.getElementById('c_price').value)||0,
+    energy: parseInt(document.getElementById('c_energy').value)||0,
+    max: parseInt(document.getElementById('c_max').value)||0,
+    provider: document.getElementById('c_prov').value,
+    provider_key: document.getElementById('c_key').value.trim(),
+    // 自定义上游那几个框（没选自定义时也存着，切回去不用重填）
+    custom_url: (document.getElementById('cu_url')||{}).value
+                ? document.getElementById('cu_url').value.trim() : '',
+    custom_method: (document.getElementById('cu_method')||{}).value || 'GET',
+    custom_ok_path: (document.getElementById('cu_okp')||{}).value
+                    ? document.getElementById('cu_okp').value.trim() : 'code',
+    custom_ok_value: (document.getElementById('cu_okv')||{}).value
+                     ? document.getElementById('cu_okv').value.trim() : '200',
+    custom_order_path: (document.getElementById('cu_oid')||{}).value
+                       ? document.getElementById('cu_oid').value.trim()
+                       : 'data.orderId',
+    auto_enabled: document.getElementById('c_aen').value==='1',
+    // 档位从文本框里现解析：每行「笔数 价格」
+    auto_prices: (function(){
+      var o = {}, t = document.getElementById('c_ap').value || '';
+      t.split('\n').forEach(function(line){
+        var m = line.trim().split(/\s+/);
+        if(m.length >= 2){
+          var c = parseInt(m[0], 10), p = parseFloat(m[1]);
+          if(c >= 2 && p > 0) o[String(c)] = p;
+        }
+      });
+      return o;
+    })(),
+    premium_enabled: document.getElementById('c_pen').value==='1',
+    premium_key: document.getElementById('c_pkey').value.trim(),
+    premium_prices: {
+      '3': parseFloat(document.getElementById('c_p3').value)||0,
+      '6': parseFloat(document.getElementById('c_p6').value)||0,
+      '12': parseFloat(document.getElementById('c_p12').value)||0
+    },
+    group_ids: document.getElementById('c_group').value.trim(),
+    contact: document.getElementById('c_contact').value.trim(),
+    notice: document.getElementById('c_notice').value.trim()
+  };
+  api('/api/shop/'+id+'/config', {method:'POST', body:JSON.stringify(patch)})
+    .then(function(d){
+      if(d.ok){
+        toast(d.baseline_reset ? '已保存（收款地址变了，扫描基线已重置）' : '配置已保存');
+        closeCfg(); refresh();
+      } else toast('保存失败：'+d.error);
+    }).catch(function(){});
+}
+
+/* ---------- 商城：流水弹窗 ---------- */
+var ordId = null;
+
+function openOrd(id, note){
+  ordId = id;
+  document.getElementById('ordTitle').textContent = '📋 收款流水 —— ' + note;
+  document.getElementById('ordBody').innerHTML = '<div class="empty">加载中…</div>';
+  document.getElementById('orderModal').style.display = 'flex';
+  loadOrd();
+}
+
+function closeOrd(){
+  ordId = null;
+  document.getElementById('orderModal').style.display = 'none';
+}
+
+function loadOrd(){
+  if(!ordId) return;
+  api('/api/shop/'+ordId+'/payments').then(function(d){
+    if(!d.ok){ document.getElementById('ordBody').innerHTML='<div class="empty">'+esc(d.error)+'</div>'; return; }
+    var t = d.today || {};
+    var sc = d.scan || {};
+    var sub = '今日 '+t.count+' 笔 / '+t.trx+' TRX / '+t.energy+' 能量'
+            + '　待处理 '+d.attention+' 笔';
+    if(sc.pay_address){
+      sub += '　扫描基线：' + (sc.baseline ? '已建立' : '未建立');
+    }
+    document.getElementById('ordSub').textContent = sub;
+    var ps = d.payments || [];
+    if(!ps.length){ document.getElementById('ordBody').innerHTML='<div class="empty">还没有流水</div>'; return; }
+    var h = '<table class="ordtbl"><tr><th>时间</th><th>来自地址</th><th>收到</th><th>倍数</th><th>发放能量</th><th>状态</th><th>操作</th></tr>';
+    ps.forEach(function(p){
+      var col = {done:'#3fb950', pending:'#d29922', skipped:'#7d8590'}[p.status] || '#f85149';
+      var acts = '';
+      if(p.status==='failed' || p.status==='pending'){
+        acts += '<button class="sm" onclick="payAct(\''+p.txid+'\',\'retry\')">重发</button> ';
+        acts += '<button class="gray sm" onclick="payAct(\''+p.txid+'\',\'mark\')">忽略</button>';
+      }
+      acts += '<span class="muted" title="'+esc(p.txid)+'">tx:'+esc((p.txid||'').slice(0,8))+'…</span>';
+      h += '<tr>'
+         + '<td class="muted">'+esc(p.at_str)+'</td>'
+         + '<td><code style="font-size:11.5px">'+esc(p.from)+'</code></td>'
+         + '<td>'+esc(p.amount)+' TRX</td>'
+         + '<td>'+esc(p.units)+'</td>'
+         + '<td>'+esc(p.energy)+'</td>'
+         + '<td><span style="color:'+col+'">'+esc(p.status_label)+'</span>'
+           + (p.note ? '<div class="muted" style="max-width:220px;word-break:break-all">'+esc(p.note)+'</div>' : '')
+           + '</td>'
+         + '<td style="white-space:nowrap">'+acts+'</td></tr>';
+    });
+    document.getElementById('ordBody').innerHTML = h + '</table>';
+  }).catch(function(){});
+}
+
+function payAct(txid, action){
+  if(!ordId) return;
+  if(action==='retry' && !confirm('重新给这个地址发一次能量？\n（如果上游其实已经接过单，会重复发，请确认）')) return;
+  api('/api/shop/'+ordId+'/payment/'+txid+'/'+action, {method:'POST'})
+    .then(function(d){
+      if(d.ok){ toast('已处理'); loadOrd(); refresh(); }
+      else toast('失败：'+d.error);
+    }).catch(function(){});
+}
+
+/* ---------- 续期弹窗 ---------- */
+var extId = null;
+
+function openExt(id, note){
+  extId = id;
+  document.getElementById('extTitle').textContent = '给「'+note+'」续期';
+  var box = document.getElementById('extOpts');
+  box.innerHTML = '';
+  DURATIONS.forEach(function(d){
+    var b = document.createElement('button');
+    b.textContent = d.label;
+    b.onclick = function(){ doExtend(d.value, d.label); };
+    box.appendChild(b);
+  });
+  document.getElementById('extModal').style.display = 'flex';
+}
+
+function closeExt(){
+  extId = null;
+  document.getElementById('extModal').style.display = 'none';
+}
+
+function doExtend(dur, label){
+  if(!extId) return;
+  var id = extId;
+  closeExt();
+  api('/api/bots/'+id+'/extend', {method:'POST', body:JSON.stringify({duration:dur})})
+    .then(function(d){
+      if(d.ok){ toast('已续期：'+label); refresh(); }
+      else toast('失败：'+d.error);
+    }).catch(function(){});
+}
+
+function refresh(){
+  api('/api/bots').then(function(d){
+    if(!d || !d.ok) return;
+    applyRole(d.me);
+    render(d);
+    if(ME.role==='admin') loadMerch();
+  }).catch(function(){});
+}
+
+/* ---------- 改密码 ---------- */
+var cpForce = false;
+
+function openChpass(force){
+  cpForce = !!force;
+  document.getElementById('cpCancel').style.display = force ? 'none' : '';
+  document.getElementById('chpassHint').textContent = force
+    ? '这是初始密码，为了安全请先改成自己的' : '修改你的登录密码';
+  document.getElementById('chpassModal').style.display = 'flex';
+}
+
+function closeChpass(){
+  if(cpForce){ toast('必须先改密码才能用'); return; }
+  document.getElementById('chpassModal').style.display = 'none';
+}
+
+function doChpass(){
+  var o = document.getElementById('cp_old').value;
+  var n = document.getElementById('cp_new').value;
+  var n2 = document.getElementById('cp_new2').value;
+  if(!n || n !== n2){ toast('两次输入的新密码不一样'); return; }
+  api('/api/me/password', {method:'POST', body:JSON.stringify({old:o, new:n})})
+    .then(function(d){
+      if(!d || !d.ok){ toast((d&&d.error)||'改不了'); return; }
+      if(d.token){ TOK = d.token; _setLS('token', TOK); }
+      cpForce = false;
+      document.getElementById('chpassModal').style.display = 'none';
+      toast('密码已修改');
+      refresh();
+    }).catch(function(){});
+}
+
+/* ---------- 换机器人 Token ---------- */
+var tkId = null;
+
+function openToken(id, note){
+  tkId = id;
+  document.getElementById('tkTitle').textContent = '🔑 换 Token —— ' + note;
+  document.getElementById('tk_val').value = '';
+  document.getElementById('tokenModal').style.display = 'flex';
+  api('/api/bots/'+id+'/token').then(function(d){
+    if(d && d.ok) document.getElementById('tk_val').value = d.token || '';
+  }).catch(function(){});
+}
+
+function closeToken(){
+  tkId = null;
+  document.getElementById('tokenModal').style.display = 'none';
+}
+
+function saveToken(){
+  var v = document.getElementById('tk_val').value.trim();
+  if(!v){ toast('请填 token'); return; }
+  api('/api/bots/'+tkId+'/token', {method:'POST', body:JSON.stringify({token:v})})
+    .then(function(d){
+      if(!d || !d.ok){ toast((d&&d.error)||'换不了'); return; }
+      toast('已换好，记得让使用者重新发绑定码');
+      closeToken(); refresh();
+    }).catch(function(){});
+}
+
+/* ---------- 商户管理 ---------- */
+function addMerch(){
+  var name = document.getElementById('m_name').value.trim();
+  var user = document.getElementById('m_user').value.trim();
+  if(!user){ toast('请填登录账号'); return; }
+  api('/api/merchants', {method:'POST', body:JSON.stringify({name:name, user:user})})
+    .then(function(d){
+      if(!d || !d.ok){ toast((d&&d.error)||'建不了'); return; }
+      var m = d.merchant || {};
+      document.getElementById('merch-new').innerHTML =
+        '<div style="background:#0d1117;border:1px solid #3fb950;border-radius:6px;padding:10px">'
+        + '<b style="color:#3fb950">✅ 商户建好了，把下面这些发给客户（密码只显示这一次）</b>'
+        + '<div style="margin-top:6px">登录网址：<code>'+esc(location.origin)+'/m</code></div>'
+        + '<div>账号：<code>'+esc(m.user)+'</code></div>'
+        + '<div>初始密码：<code style="font-size:15px">'+esc(d.pass)+'</code></div>'
+        + '<div class="muted" style="margin-top:6px">他第一次登录会被要求改密码</div>'
+        + '<button class="gray sm" style="margin-top:8px" onclick="copyTut(\''
+        + esc('网址：'+location.origin+'/m\n账号：'+m.user+'\n初始密码：'+d.pass
+              +'\n登录后请先改密码')+'\')">📋 复制这段发给客户</button>'
+        + '</div>';
+      document.getElementById('m_name').value = '';
+      document.getElementById('m_user').value = '';
+      loadMerch();
+    }).catch(function(){});
+}
+
+function loadMerch(){
+  api('/api/merchants').then(function(d){
+    if(!d || !d.ok) return;
+    renderMerch(d.merchants || []);
+  }).catch(function(){});
+}
+
+function renderMerch(rows){
+  var el = document.getElementById('list-merch');
+  if(!el) return;
+  document.getElementById('cnt-merch').textContent =
+    rows.length ? '（'+rows.length+' 个）' : '';
+  if(!rows.length){ el.innerHTML = '<div class="empty">还没有商户</div>'; return; }
+  var h = '<table><tr><th>客户</th><th>登录账号</th><th>机器人</th>'
+        + '<th>状态</th><th>最后登录</th><th>操作</th></tr>';
+  rows.forEach(function(m){
+    h += '<tr>'
+      + '<td><b>'+esc(m.name)+'</b><div class="muted">'+esc(m.created)+'</div></td>'
+      + '<td><code>'+esc(m.user)+'</code></td>'
+      + '<td>'+(m.bot_count||0)+' 台</td>'
+      + '<td>'+(m.enabled
+          ? '<span class="tag ok">● 正常</span>'
+          : '<span class="tag off">已停用</span>')
+        + (m.must_change ? '<div class="muted">还没改初始密码</div>' : '')+'</td>'
+      + '<td class="muted">'+esc(m.last_login||'—')+'</td>'
+      + '<td style="white-space:nowrap">'
+        + '<button class="gray sm" onclick="openAssign(\''+m.mid+'\',\''+esc(m.name)+'\')">分配机器人</button> '
+        + '<button class="gray sm" onclick="actMerch(\''+m.mid+'\',\'reset\')">重置密码</button> '
+        + (m.enabled
+            ? '<button class="gray sm" onclick="actMerch(\''+m.mid+'\',\'disable\')">停用</button> '
+            : '<button class="sm" onclick="actMerch(\''+m.mid+'\',\'enable\')">启用</button> ')
+        + '<button class="red sm" onclick="delMerch(\''+m.mid+'\',\''+esc(m.name)+'\')">删除</button>'
+      + '</td></tr>';
+  });
+  el.innerHTML = h + '</table>';
+}
+
+function actMerch(mid, op){
+  api('/api/merchants/'+mid+'/'+op, {method:'POST'}).then(function(d){
+    if(!d || !d.ok){ toast((d&&d.error)||'操作失败'); return; }
+    if(op==='reset' && d.pass){
+      document.getElementById('merch-new').innerHTML =
+        '<div style="background:#0d1117;border:1px solid #d29922;border-radius:6px;padding:10px">'
+        + '<b style="color:#d29922">新密码（只显示这一次）</b>'
+        + '<div>账号：<code>'+esc(d.user||'')+'</code> '
+        + '密码：<code style="font-size:15px">'+esc(d.pass)+'</code></div></div>';
+      toast('密码已重置，记得发给他');
+    } else {
+      toast(op==='disable' ? '已停用' : '已启用');
+    }
+    loadMerch();
+  }).catch(function(){});
+}
+
+function delMerch(mid, name){
+  if(!confirm('确定删除商户「'+name+'」？\n（他名下的机器人要先收回来才能删）')) return;
+  api('/api/merchants/'+mid+'/delete', {method:'POST'}).then(function(d){
+    if(!d || !d.ok){ toast((d&&d.error)||'删不掉'); return; }
+    toast('已删除'); loadMerch();
+  }).catch(function(){});
+}
+
+/* ---------- 分配机器人 ---------- */
+var asMid = null, AS_SECRETS = {};
+
+function openAssign(mid, name){
+  asMid = mid;
+  document.getElementById('asTitle').textContent = '分配机器人给 ' + name;
+  document.getElementById('assignModal').style.display = 'flex';
+  document.getElementById('asBody').innerHTML = '<div class="empty">加载中…</div>';
+  api('/api/bots').then(function(d){
+    if(!d || !d.ok){ document.getElementById('asBody').innerHTML =
+      '<div class="empty">读不到机器人列表</div>'; return; }
+    var h = '<table><tr><th>选</th><th>备注</th><th>机器人</th>'
+          + '<th>现在归属</th><th>带你的配置?</th></tr>';
+    AS_SECRETS = {};
+    (d.bots||[]).forEach(function(b){
+      AS_SECRETS[b.id] = !!b.has_secrets;
+      h += '<tr>'
+        + '<td><input type="checkbox" class="as-chk" value="'+esc(b.id)+'"'
+          + (((b.mid||'')===mid) ? ' checked' : '') + '></td>'
+        + '<td>'+esc(b.note)+'</td>'
+        + '<td class="muted">@'+esc(b.username)+'</td>'
+        + '<td class="muted">'+((b.mid||'')===mid ? '这个商户'
+            : (b.mid ? '别的商户' : '管理员'))+'</td>'
+        + '<td>'+(b.has_secrets
+            ? '<span style="color:#d29922">⚠️ 有</span>'
+            : '<span class="muted">空</span>')+'</td>'
+        + '</tr>';
+    });
+    document.getElementById('asBody').innerHTML = h + '</table>';
+  }).catch(function(){});
+}
+
+function closeAssign(){
+  asMid = null;
+  document.getElementById('assignModal').style.display = 'none';
+}
+
+function doAssign(){
+  var bids = [], sec = 0;
+  document.querySelectorAll('.as-chk').forEach(function(c){
+    if(c.checked){
+      bids.push(c.value);
+      if(AS_SECRETS[c.value]) sec++;
+    }
+  });
+  // ★ 会清掉配置就得先说清楚 —— 这个操作是不可逆的
+  if(sec && !confirm(
+      '注意：勾选的里面有 ' + sec + ' 台带着你的配置（收款地址 / 上游 Key / 通知群）。\n\n'
+    + '确定分配的话，这几台的配置会被【自动清空】——\n'
+    + '免得客户一进后台就看见你的收款地址和 API Key。\n\n'
+    + '清掉之后要客户自己重新填，你这边也得重填一遍。\n\n'
+    + '确定继续？')) return;
+  api('/api/merchants/'+asMid+'/bots',
+      {method:'POST', body:JSON.stringify({bids:bids, clear_secrets:true})})
+    .then(function(d){
+      if(!d || !d.ok){ toast((d&&d.error)||'分配失败'); return; }
+      var msg = '划过去 ' + (d.moved||0) + ' 台，收回 ' + (d.taken||0) + ' 台';
+      if(d.cleared) msg += '，清空了 ' + d.cleared + ' 台的收款地址和 Key';
+      toast(msg);
+      closeAssign(); refresh();
+    }).catch(function(){});
+}
+
+function addBot(){
+  var note=document.getElementById('note').value.trim();
+  var token=document.getElementById('token').value.trim();
+  var type=document.getElementById('type').value;
+  var duration=document.getElementById('duration').value || 'forever';
+  if(!token){ toast('请填写 token'); return; }
+  toast('正在验证 token…');
+  api('/api/bots', {method:'POST', body:JSON.stringify(
+      {note:note, token:token, type:type, duration:duration})})
+    .then(function(d){
+      if(d.ok){
+        document.getElementById('note').value='';
+        document.getElementById('token').value='';
+        toast('添加成功，绑定码已生成');
+        refresh();
+      } else toast('失败：'+d.error);
+    }).catch(function(){});
+}
+
+function act(id, action){
+  if(action==='newcode' && !confirm('换绑定码会解除当前使用者的绑定，确定吗？')) return;
+  api('/api/bots/'+id+'/'+action, {method:'POST'})
+    .then(function(){ toast('已处理'); refresh(); }).catch(function(){});
+}
+
+function delBot(id, note){
+  if(!confirm('确定删除「'+note+'」吗？删除后该机器人立即停止，数据一并清除。')) return;
+  api('/api/bots/'+id+'/delete', {method:'POST'})
+    .then(function(){ toast('已删除'); refresh(); }).catch(function(){});
+}
+
+function copyCode(code){
+  navigator.clipboard.writeText('/admin '+code).then(function(){
+    toast('已复制：/admin '+code+'   直接发给对方即可');
+  }).catch(function(){ toast('绑定码：'+code); });
+}
+
+function copyTut(txt){
+  navigator.clipboard.writeText(txt).then(function(){
+    toast('已复制，直接粘贴发给对方即可');
+  }).catch(function(){ toast('复制失败，请手动选中文字复制'); });
+}
+
+document.getElementById('type').addEventListener('change', function(){
+  var h=document.getElementById('typeHint');
+  var t=this.value;
+  if(t==='usdt'){
+    h.textContent='USDT 助手：绑定后可以查 TRC20 地址交易、监听地址进出账';
+  } else if(t==='shop'){
+    h.textContent='商城机器人：面向公众的自助服务，添加后记得点「⚙️ 配置」填收款地址';
+  } else {
+    h.textContent='添加后系统会自动验证 token，并生成一个绑定码';
+  }
+});
+
+/* ============ 新手教程（可复制发给朋友） ============ */
+var TUT_MAKE = `【怎么创建 Telegram 机器人并拿到 token】
+
+第 1 步　找到 @BotFather
+打开 Telegram，在最上面的搜索框输入：@BotFather
+认准带蓝色认证勾的那个（名字就叫 BotFather，头像是个机器人图标）
+点进去，点底部的「START / 开始」
+
+第 2 步　发送创建指令
+在对话框里发送这一条：/newbot
+
+第 3 步　给机器人起个名字
+它会问你：Alright, a new bot. How are we going to call it?
+（意思是：给机器人起个名字）
+你随便起一个，比如：客服助手
+中文也行，这个名字是给别人看的
+
+第 4 步　给机器人起个用户名
+它接着问：Good. Now let's choose a username for your bot.
+（意思是：给机器人起一个用户名）
+要输入一个以 bot 结尾的英文，比如：mykefu2026_bot
+如果提示已被占用，换一个再试
+
+第 5 步　复制 token 发给我
+创建成功后它会给你一大段文字，里面有一行：
+
+    Use this token to access the HTTP API:
+    1234567890:AAHxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+下面那串「数字:字母」就是 token。
+长按它 → 复制 → 发给我就行了。
+
+⚠️ token 相当于这个机器人的钥匙，只发给我一个人，不要发到群里或告诉别人。
+`;
+
+var TUT_BIND = `
+【拿到绑定码之后怎么用】
+
+我会发给你一条这样的消息：
+
+    /admin XXXXXXXXX
+
+你这样操作：
+1. 在 Telegram 里打开你刚建好的那个机器人
+2. 把 /admin XXXXXXXXX 原样发过去（注意前面有个斜杠 /）
+3. 机器人回复「✅ 绑定成功」，就完成了
+
+绑定之后（客服机器人）：
+• 客户给机器人发消息 → 会自动转发到你的 Telegram
+• 你要回复 → 长按那条客户消息 → 点「回复」→ 输入内容发送
+  （不点「回复」直接发的话，消息发不出去）
+• 常用指令：
+    /list    查看最近联系过的客户
+    /help    查看全部指令
+
+⚠️ 想一直能收到客户消息，手机上的 Telegram 要保持登录，
+   也不要把这个机器人拉黑或删掉对话。
+`;
+
+var TUT = TUT_MAKE + '\n' + TUT_BIND;
+document.getElementById('tut').textContent = TUT;
+
+// ★ /m 一律显示登录页，不自动登录 —— 那是客户的入口，
+//   别把浏览器里存着的管理员身份套上去
+if(!IS_M && (TOK || PW)){ api('/api/bots').then(startUI).catch(function(){}); }
+</script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+# 打进镜像时不要的东西（这些在宿主机上另外挂载进去）
+.git
+.venv
+__pycache__/
+*.pyc
+build/
+dist/
+data/
+运行日志.txt
+_github_upload/
+
+# exe 是 Windows 用的，镜像里跑的是 python
+*.exe
+*.spec

@@ -1,0 +1,168 @@
+波场能量租赁平台 
+ 如何购买 
+ 如何下单 
+ 能量/会员API 
+ 获取ApiKey 
+ 能量下单 
+ 自动预估 
+ 查询价格 
+ 笔数下单 
+ 笔数查询 
+ 笔数编辑 
+ 笔数列表 
+ 笔数委托记录 
+ 查询余额 
+ 激活地址 接口地址 
+ 请求参数 
+ 返回参数 
+ 代码示例 
+ 速充检测 
+ 速充下单 
+ 速充查询 
+ 用户名查询 
+ 会员星星 
+ 会员订单查询 
+ 价格公示 
+ 价格公示 
+ 联系我们 
+ 联系合作 
+ # 接口地址
+ GET https://web.apitrx.com/activation
+ # 请求参数
+ 参数名称 类型 说明 示例 
+ apikey string TG机器人获取的apikey 83928AFB-14A5-4878-A63D-128467830293 
+ add string 需要激活的波场地址 TX8BF429hr7qK1Te8UWLxD9xbumtX11111 
+ # 返回参数
+ { 
+ "code" : 200 , 
+ "data" : { 
+ "balance" : 109.5 
+ "txid" : "cedf46ed366fb89cddc1e892383c6f5abe2f16dbefa97b15c76989c111027880" 
+ "amount" : 2.0 
+ } , 
+ "message" : "SUCCESS" 
+ } 
+ 参数名称 类型 说明 示例 
+ code int 200为成功，其他均为失败 200/4xx/5xx 
+ message string 提示信息 SUCCESS/ERROR 
+ data.balance float 剩余金额(TRX) 109.5 
+ data.txid string 激活的哈希值 cedf46ed366fb89cddc... 
+ data.amount float 本次消费金额(TRX) 2.0 
+ # 代码示例
+ Java 
+ Go 
+ Python 
+ Php 
+ Curl 
+ import java . io . BufferedReader ; 
+ import java . io . IOException ; 
+ import java . io . InputStreamReader ; 
+ import java . net . HttpURLConnection ; 
+ import java . net . URL ; 
+ import java . net . URLEncoder ; 
+ public class HttpGetWithParameters { 
+ public static void main ( String [ ] args ) { 
+ try { 
+ // 设置要访问的URL 
+ String baseUrl = "https://web.apitrx.com/activation" ; 
+ // 设置参数 
+ String apiKey = "83928AFB-14A5-4878-A63D-128467830293" ; 
+ String add = "TX8BF429hr7qK1Te8UWLxD9xbumtX11111" ; 
+ // 构建带参数的URL 
+ String urlWithParams = baseUrl + "?" + 
+ "apikey=" + URLEncoder . encode ( apiKey , "UTF-8" ) + 
+ "&add=" + URLEncoder . encode ( add , "UTF-8" ) ; 
+ // 创建URL对象 
+ URL obj = new URL ( urlWithParams ) ; 
+ // 打开连接 
+ HttpURLConnection connection = ( HttpURLConnection ) obj . openConnection ( ) ; 
+ // 设置请求方式为GET 
+ connection . setRequestMethod ( "GET" ) ; 
+ // 获取响应码 
+ int responseCode = connection . getResponseCode ( ) ; 
+ System . out . println ( "Response Code: " + responseCode ) ; 
+ // 读取响应内容 
+ BufferedReader in = new BufferedReader ( new InputStreamReader ( connection . getInputStream ( ) ) ) ; 
+ String inputLine ; 
+ StringBuilder response = new StringBuilder ( ) ; 
+ while ( ( inputLine = in . readLine ( ) ) != null ) { 
+ response . append ( inputLine ) ; 
+ } 
+ // 关闭连接 
+ in . close ( ) ; 
+ // 打印响应内容 
+ System . out . println ( "Response Content: " + response . toString ( ) ) ; 
+ } catch ( IOException e ) { 
+ e . printStackTrace ( ) ; 
+ } 
+ } 
+ } 
+ package main
+ import ( 
+ "fmt" 
+ "net/http" 
+ "net/url" 
+ ) 
+ func sendGetRequest ( ) { 
+ // 设置要访问的URL 
+ baseURL := "https://web.apitrx.com/activation" 
+ // 设置参数 
+ params := url . Values { } 
+ params . Add ( "apikey" , "83928AFB-14A5-4878-A63D-128467830293" ) 
+ params . Add ( "add" , "TX8BF429hr7qK1Te8UWLxD9xbumtX11111" ) 
+ // 构建带参数的URL 
+ urlWithParams := baseURL + "?" + params . Encode ( ) 
+ // 发送GET请求 
+ response , err := http . Get ( urlWithParams ) 
+ if err != nil { 
+ fmt . Println ( "Error:" , err ) 
+ return 
+ } 
+ defer response . Body . Close ( ) 
+ // 读取响应内容 
+ body , err := io . ReadAll ( response . Body ) 
+ if err != nil { 
+ fmt . Println ( "Error reading response:" , err ) 
+ return 
+ } 
+ // 打印响应内容 
+ fmt . Println ( "Response Code:" , response . Status ) 
+ fmt . Println ( "Response Content:" , string ( body ) ) 
+ } 
+ func main ( ) { 
+ sendGetRequest ( ) 
+ } 
+ import requests
+ def send_get_request ( ) : 
+ # 设置要访问的URL 
+ url = "https://web.apitrx.com/activation" 
+ # 设置参数 
+ params = { 
+ 'apikey' : '83928AFB-14A5-4878-A63D-128467830293' , 
+ 'add' : 'TX8BF429hr7qK1Te8UWLxD9xbumtX11111' 
+ } 
+ # 发送GET请求 
+ response = requests . get ( url , params = params ) 
+ # 打印响应信息 
+ print ( "Response Code:" , response . status_code ) 
+ print ( "Response Content:" , response . text ) 
+ if __name__ == "__main__" : 
+ send_get_request ( ) 
+ <?php 
+ // 设置要访问的URL 
+ $url = 'https://web.apitrx.com/activation' ; 
+ // 设置参数 
+ $apiKey = '83928AFB-14A5-4878-A63D-128467830293' ; 
+ $add = 'TX8BF429hr7qK1Te8UWLxD9xbumtX11111' ; 
+ // 构建带参数的URL 
+ $params = [ 
+ 'apikey' => $apiKey , 
+ 'add' => $add 
+ ] ; 
+ $urlWithParams = $url . '?' . http_build_query ( $params ) ; 
+ // 发送GET请求并获取响应内容 
+ $response = file_get_contents ( $urlWithParams ) ; 
+ // 打印响应内容 
+ echo $response ; 
+ ?> 
+ curl --location 'https://web.apitrx.com/activation?apikey=83928AFB-14A5-4878-A63D-128467830293&add=TX8BF429hr7qK1Te8UWLxD9xbumtX11111'

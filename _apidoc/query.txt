@@ -1,0 +1,172 @@
+波场能量租赁平台 
+ 如何购买 
+ 如何下单 
+ 能量/会员API 
+ 获取ApiKey 
+ 能量下单 
+ 自动预估 
+ 查询价格 
+ 笔数下单 
+ 笔数查询 
+ 笔数编辑 
+ 笔数列表 
+ 笔数委托记录 
+ 查询余额 
+ 激活地址 
+ 速充检测 
+ 速充下单 
+ 速充查询 
+ 用户名查询 接口地址 
+ 请求参数 
+ 返回参数 
+ 代码示例 
+ 会员星星 
+ 会员订单查询 
+ 价格公示 
+ 价格公示 
+ 联系我们 
+ 联系合作 
+ # 接口地址
+ 接入须知
+ Telegarm Premium 用户名查询 和 会员开通 接口均提供两个 URL，支持 USDT 或者 TRX 付款。
+ 二级域名 gift 是 USDT 计价，请前往 https://t.me/GiftAPIBot  获取 ApiKey（推荐）
+ 二级域名 web 是实时汇率的 TRX 计价，请前往 https://t.me/XXTrxBot  获取 ApiKey
+ 根据自己需求，选择其中一种方式对接，提前在对应的机器人预存余额。
+ POST https://gift.apitrx.com/query USDT计价，该接口查询用户名是否满足开通条件。
+ POST https://web.apitrx.com/query TRX计价，该接口查询用户名是否满足开通条件。
+ # 请求参数
+ 参数名称 类型 说明 示例 
+ apikey string 对应机器人获取的apikey 83928AFB-14A5-4878-A63D-128467830293 
+ username string 待开通的用户名 @premium 
+ # 返回参数
+ { 
+ "code" : 200 , 
+ "data" : { 
+ "username" : "@preminum" , 
+ "nickname" : "昵称" , 
+ "photo" : "https://cdn4.telesco.pe/file/OU8KQ2jdJXACQnww72fQKgo5LhLkQJKTF5Ct0U-dNxsK2iQ5B0xrqPe4yEHSxCKMaSLv4USObMMEta_It_QBzgh5jgErXBu0QR-i8YNKirlitB1TBxWCU7-M0K3o0mv2xmrZrWIejD_g4-Ss7fjr1Zj0r5z-8SA2bgAAdDM6gOlYNwJAzXtuxLLRPAodYrfFSe8F56f6csrNEO3tGPFLd6vFyZY-pJejK_skfPS5xyd53ilmTUTyVy7xBCBMX-_kBhfygfEY-tsMxQbIcs2D1UdHKtpllkce7hSdDPTpRyvZvMi2dhHIIRN8F_0viWa1woTdQrEDxQXLSSDZnw16RA.jpg" , 
+ } , 
+ "message" : "SUCCESS" 
+ } 
+ 参数名称 类型 说明 示例 
+ code int 200符合条件，其他均不符合开通条件 200/500 
+ message string 提示信息 SUCCESS/ERROR/已经是会员了/用户不存在 
+ data.username string 用户名 premium 
+ data.nickname string 昵称 jack 
+ data.photo string 用户头像 https://cdn4.telesco.pe... 
+ # 代码示例
+ Java 
+ Go 
+ Python 
+ Php 
+ Curl 
+ import java . io . * ; 
+ import java . net . HttpURLConnection ; 
+ import java . net . URL ; 
+ import org . json . JSONObject ; 
+ public class PostRequestExample { 
+ public static void main ( String [ ] args ) throws Exception { 
+ URL url = new URL ( "https://gift.apitrx.com/query" ) ; 
+ HttpURLConnection conn = ( HttpURLConnection ) url . openConnection ( ) ; 
+ conn . setRequestMethod ( "POST" ) ; 
+ conn . setRequestProperty ( "Content-Type" , "application/json" ) ; 
+ conn . setDoOutput ( true ) ; 
+ JSONObject jsonInput = new JSONObject ( ) ; 
+ jsonInput . put ( "apikey" , "83928AFB-14A5-4878-A63D-128467830293" ) ; 
+ jsonInput . put ( "username" , "premium" ) ; 
+ try ( OutputStream os = conn . getOutputStream ( ) ) { 
+ byte [ ] input = jsonInput . toString ( ) . getBytes ( "utf-8" ) ; 
+ os . write ( input , 0 , input . length ) ; 
+ } 
+ InputStream is = conn . getInputStream ( ) ; 
+ BufferedReader br = new BufferedReader ( new InputStreamReader ( is , "utf-8" ) ) ; 
+ StringBuilder response = new StringBuilder ( ) ; 
+ String line ; 
+ while ( ( line = br . readLine ( ) ) != null ) { 
+ response . append ( line . trim ( ) ) ; 
+ } 
+ JSONObject jsonResponse = new JSONObject ( response . toString ( ) ) ; 
+ System . out . println ( "Code: " + jsonResponse . getInt ( "code" ) ) ; 
+ System . out . println ( "Message: " + jsonResponse . getString ( "message" ) ) ; 
+ JSONObject data = jsonResponse . getJSONObject ( "data" ) ; 
+ System . out . println ( "Username: " + data . getString ( "username" ) ) ; 
+ System . out . println ( "Photo: " + data . getString ( "photo" ) ) ; 
+ System . out . println ( "Nickname: " + data . getString ( "nickname" ) ) ; 
+ } 
+ } 
+ package main
+ import ( 
+ "bytes" 
+ "encoding/json" 
+ "fmt" 
+ "net/http" 
+ "io/ioutil" 
+ ) 
+ func main ( ) { 
+ url := "https://gift.apitrx.com/query" 
+ payload := map [ string ] string { 
+ "apikey" : "83928AFB-14A5-4878-A63D-128467830293" , 
+ "username" : "premium" , 
+ } 
+ jsonData , _ := json . Marshal ( payload ) 
+ resp , err := http . Post ( url , "application/json" , bytes . NewBuffer ( jsonData ) ) 
+ if err != nil { 
+ panic ( err ) 
+ } 
+ defer resp . Body . Close ( ) 
+ body , _ := ioutil . ReadAll ( resp . Body ) 
+ var result struct { 
+ Code int `json:"code"` 
+ Message string `json:"message"` 
+ Data struct { 
+ Username string `json:"username"` 
+ Photo string `json:"photo"` 
+ Nickname string `json:"nickname"` 
+ } `json:"data"` 
+ } 
+ json . Unmarshal ( body , & result ) 
+ fmt . Println ( "Code:" , result . Code ) 
+ fmt . Println ( "Message:" , result . Message ) 
+ fmt . Println ( "Username:" , result . Data . Username ) 
+ fmt . Println ( "Photo:" , result . Data . Photo ) 
+ fmt . Println ( "Nickname:" , result . Data . Nickname ) 
+ } 
+ import requests
+url = "https://gift.apitrx.com/query" 
+payload = { 
+ "apikey" : "83928AFB-14A5-4878-A63D-128467830293" , 
+ "username" : "premium" 
+ } 
+response = requests . post ( url , json = payload ) 
+data = response . json ( ) 
+ print ( "Code:" , data [ 'code' ] ) 
+ print ( "Message:" , data [ 'message' ] ) 
+ print ( "Username:" , data [ 'data' ] [ 'username' ] ) 
+ print ( "Photo:" , data [ 'data' ] [ 'photo' ] ) 
+ print ( "Nickname:" , data [ 'data' ] [ 'nickname' ] ) 
+ <?php 
+ < ? php 
+ $url = "https://gift.apitrx.com/query" ; 
+ $data = [ 
+ "apikey" => "83928AFB-14A5-4878-A63D-128467830293" , 
+ "username" => "premium" 
+ ] ; 
+ $options = [ 
+ 'http' => [ 
+ 'header' => "Content-Type: application/json\r\n" , 
+ 'method' => 'POST' , 
+ 'content' => json_encode ( $data ) , 
+ ] , 
+ ] ; 
+ $context = stream_context_create ( $options ) ; 
+ $response = file_get_contents ( $url , false , $context ) ; 
+ $result = json_decode ( $response , true ) ; 
+ echo "Code: " . $result [ 'code' ] . "\n" ; 
+ echo "Message: " . $result [ 'message' ] . "\n" ; 
+ echo "Username: " . $result [ 'data' ] [ 'username' ] . "\n" ; 
+ echo "Photo: " . $result [ 'data' ] [ 'photo' ] . "\n" ; 
+ echo "Nickname: " . $result [ 'data' ] [ 'nickname' ] . "\n" ; 
+ ?> 
+ curl -X POST https://gift.apitrx.com/query \
+ -H "Content-Type: application/json" \
+ -d '{"apikey":"83928AFB-14A5-4878-A63D-128467830293","username":"premium"}'

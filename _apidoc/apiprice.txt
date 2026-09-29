@@ -1,0 +1,164 @@
+波场能量租赁平台 
+ 如何购买 
+ 如何下单 
+ 能量/会员API 
+ 获取ApiKey 
+ 能量下单 
+ 自动预估 
+ 查询价格 接口地址 
+ 请求参数 
+ 返回参数 
+ 代码示例 
+ 笔数下单 
+ 笔数查询 
+ 笔数编辑 
+ 笔数列表 
+ 笔数委托记录 
+ 查询余额 
+ 激活地址 
+ 速充检测 
+ 速充下单 
+ 速充查询 
+ 用户名查询 
+ 会员星星 
+ 会员订单查询 
+ 价格公示 
+ 价格公示 
+ 联系我们 
+ 联系合作 
+ # 接口地址
+ GET https://web.apitrx.com/price
+ # 请求参数
+ 参数名称 类型 说明 示例 
+ apikey string TG机器人获取的apikey 83928AFB-14A5-4878-A63D-128467830293 
+ value int (可选)数量不传默认65000，想查询10万能量价格，写100000 100000 
+ # 返回参数
+ { 
+ "code" : 200 , 
+ "data" : { 
+ "1" : 2.25 , 
+ "168" : 26.41 , 
+ "24" : 9.14 , 
+ "336" : 52.81 , 
+ "72" : 11.38 , 
+ "720" : 113.75 , 
+ "auto" : 4.0 , 
+ "smart" : 2.8 , 
+ } , 
+ "message" : "SUCCESS" 
+ } 
+ 参数名称 类型 说明 示例 
+ code int 200为成功，其他均为失败 200/4xx/5xx 
+ message string 提示信息 SUCCESS/ERROR 
+ data.1 string 1 小时价格 2.25 
+ data.24 string 1 天价格 9.14 
+ data.72 string 3 天价格 11.38 
+ data.168 string 7 天价格 26.41 
+ data.336 string 14 天价格 52.81 
+ data.720 string 30 天价格 113.75 
+ data.auto string 笔数价格 4.2 
+ data.samrt string 智能托管价格 3.1 
+ # 代码示例
+ Java 
+ Go 
+ Python 
+ Php 
+ Curl 
+ import java . io . BufferedReader ; 
+ import java . io . InputStreamReader ; 
+ import java . net . HttpURLConnection ; 
+ import java . net . URL ; 
+ import java . net . URLEncoder ; 
+ public class HttpGetWithParameters { 
+ public static void main ( String [ ] args ) { 
+ try { 
+ // 设置要访问的URL 
+ String baseUrl = "https://web.apitrx.com/price" ; 
+ // 设置参数 
+ String apiKey = "83928AFB-14A5-4878-A63D-128467830293" ; 
+ String encodedApiKey = URLEncoder . encode ( apiKey , "UTF-8" ) ; 
+ // 构建带参数的URL 
+ String urlWithParams = baseUrl + "?apikey=" + encodedApiKey ; 
+ // 创建URL对象 
+ URL obj = new URL ( urlWithParams ) ; 
+ // 打开连接 
+ HttpURLConnection connection = ( HttpURLConnection ) obj . openConnection ( ) ; 
+ // 设置请求方式为GET 
+ connection . setRequestMethod ( "GET" ) ; 
+ // 获取响应码 
+ int responseCode = connection . getResponseCode ( ) ; 
+ System . out . println ( "Response Code: " + responseCode ) ; 
+ // 读取响应内容 
+ BufferedReader in = new BufferedReader ( new InputStreamReader ( connection . getInputStream ( ) ) ) ; 
+ String inputLine ; 
+ StringBuilder response = new StringBuilder ( ) ; 
+ while ( ( inputLine = in . readLine ( ) ) != null ) { 
+ response . append ( inputLine ) ; 
+ } 
+ // 关闭连接 
+ in . close ( ) ; 
+ // 打印响应内容 
+ System . out . println ( "Response Content: " + response . toString ( ) ) ; 
+ } catch ( Exception e ) { 
+ e . printStackTrace ( ) ; 
+ } 
+ } 
+ } 
+ package main
+ import ( 
+ "fmt" 
+ "io/ioutil" 
+ "net/http" 
+ "net/url" 
+ ) 
+ func main ( ) { 
+ // 设置要访问的URL 
+ baseURL := "https://web.apitrx.com/price" 
+ // 设置参数 
+ apiKey := "83928AFB-14A5-4878-A63D-128467830293" 
+ // 创建URL对象并添加参数 
+ urlWithParams := baseURL + "?apikey=" + url . QueryEscape ( apiKey ) + "&value=65000" 
+ // 发送GET请求 
+ response , err := http . Get ( urlWithParams ) 
+ if err != nil { 
+ fmt . Println ( "Error:" , err ) 
+ return 
+ } 
+ defer response . Body . Close ( ) 
+ // 读取响应内容 
+ body , err := ioutil . ReadAll ( response . Body ) 
+ if err != nil { 
+ fmt . Println ( "Error reading response:" , err ) 
+ return 
+ } 
+ // 打印响应内容 
+ fmt . Println ( "Response Code:" , response . Status ) 
+ fmt . Println ( "Response Content:" , string ( body ) ) 
+ } 
+ import requests
+ def send_get_request ( ) : 
+ # 设置要访问的URL 
+ url = "https://web.apitrx.com/price" 
+ # 设置参数 
+ params = { "apikey" : "83928AFB-14A5-4878-A63D-128467830293" , "value" : 65000 } 
+ # 发送GET请求 
+ response = requests . get ( url , params = params ) 
+ # 打印响应信息 
+ print ( "Response Code:" , response . status_code ) 
+ print ( "Response Content:" , response . text ) 
+ if __name__ == "__main__" : 
+ send_get_request ( ) 
+ <?php 
+ // 设置要访问的URL 
+ $url = 'https://web.apitrx.com/price' ; 
+ // 设置参数 
+ $apiKey = '83928AFB-14A5-4878-A63D-128467830293' ; 
+ $params = [ 'apikey' => $apiKey ] ; 
+ // 构建带参数的URL 
+ $urlWithParams = $url . '?' . http_build_query ( $params ) ; 
+ // 发送GET请求并获取响应内容 
+ $response = file_get_contents ( $urlWithParams ) ; 
+ // 打印响应内容 
+ echo $response ; 
+ ?> 
+ curl "https://web.apitrx.com/price?apikey=83928AFB-14A5-4878-A63D-128467830293&value=65000"
