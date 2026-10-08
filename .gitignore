@@ -1,0 +1,12 @@
+# 运行时会变的东西 —— 别提交，每个人的都不一样
+data/
+运行日志.txt
+config.json
+bots.json
+merchants.json
+
+# Python / 打包产物
+__pycache__/
+*.pyc
+build/
+*.spec.bak

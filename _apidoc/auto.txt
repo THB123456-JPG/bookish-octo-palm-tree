@@ -1,0 +1,208 @@
+波场能量租赁平台 
+ 如何购买 
+ 如何下单 
+ 能量/会员API 
+ 获取ApiKey 
+ 能量下单 
+ 自动预估 
+ 查询价格 
+ 笔数下单 接口地址 
+ 请求参数 
+ 返回参数 
+ 回调参数 
+ 代码示例 
+ 笔数查询 
+ 笔数编辑 
+ 笔数列表 
+ 笔数委托记录 
+ 查询余额 
+ 激活地址 
+ 速充检测 
+ 速充下单 
+ 速充查询 
+ 用户名查询 
+ 会员星星 
+ 会员订单查询 
+ 价格公示 
+ 价格公示 
+ 联系我们 
+ 联系合作 
+ # 接口地址
+ GET https://web.apitrx.com/auto
+ # 请求参数
+ 参数名称 类型 说明 示例 
+ apikey string TG机器人获取的apikey 83928AFB-14A5-4878-A63D-128467830293 
+ add string 购买笔数能量的波场地址 TX8BF429hr7qK1Te8UWLxD9xbumtX11111 
+ count int 笔数 >= 2 2/5/10/30/50 
+ autoType int 0笔数套餐 1智能笔数 2账号代扣 非必填，0是 笔数套餐 ，用多少都计1笔；1是 智能笔数 ，用65k计1笔，用131k计2笔；2是 账号代扣 ，不管使用65k或者131k都扣1笔；3是 账号代扣 ，使用65k扣1笔使用131k扣2笔 
+ callback_url string 回调的url 非必填，当用户使用后，会发送用户使用详情，可用于消费通知等场景 
+ # 返回参数
+ { 
+ "code" : 200 , 
+ "data" : { 
+ "balance" : 99.5 
+ "orderId" : "20240120190912" 
+ "amount" : 5.0 
+ } , 
+ "message" : "SUCCESS" 
+ } 
+ 参数名称 类型 说明 示例 
+ code int 200为成功，其他均为失败 200/4xx/5xx 
+ message string 提示信息 SUCCESS/ERROR 
+ data.balance float 剩余金额(TRX) 99.5 
+ data.orderId string 订单ID 20240120190912 
+ data.amount float 本次消费金额(TRX) 5.0 
+ # 回调参数
+ 如果下单时传了 callback_url
+参数，即可拿到POST回调
+ { 
+ "orderId" : "202501161027217357" , 
+ "receiver" : "TX8BF429hr7qK1Te8UWLxD9xbumtX11111" , 
+ "residue" : 98 , 
+ "usdtHash" : "xxx" , 
+ "energyHash" : "xxx" , 
+ "recharge" : 0 , 
+ "state" : 1 , 
+ "autoType" : 0 , 
+ "orderCount" : 100 , 
+ "finishCount" : 1 , 
+ "detentionCount" : 1 , 
+ "useEnergy" : "131000" 
+ } 
+ 参数名称 类型 说明 示例 
+ orderId int 订单ID 202501161027217357 
+ message string 接收地址 TX8BF429hr7qK1Te8UWLxD9xbumtX11111 
+ residue int 剩余笔数 98 
+ usdtHash string 触发的转账txid xxx 
+ energyHash string 能量代理txid xxx 
+ recharge int 0委托扣费 1滞留扣费 0 
+ state int 运行状态 0已暂停 1委托中 1 
+ autoType int 0笔数套餐 1智能笔数 2账号代扣 3账号代扣 0 
+ orderCount int 总笔数 100 
+ finishCount int 完成笔数 1 
+ detentionCount int 滞留笔数 1 
+ useEnergy string 能量使用数量 "65000"/"131000" 
+ # 代码示例
+ Java 
+ Go 
+ Python 
+ Php 
+ Curl 
+ import java . io . BufferedReader ; 
+ import java . io . IOException ; 
+ import java . io . InputStreamReader ; 
+ import java . net . HttpURLConnection ; 
+ import java . net . URL ; 
+ import java . net . URLEncoder ; 
+ public class HttpGetWithParameters { 
+ public static void main ( String [ ] args ) { 
+ try { 
+ // 设置要访问的URL 
+ String baseUrl = "https://web.apitrx.com/auto" ; 
+ // 设置参数 
+ String apiKey = "83928AFB-14A5-4878-A63D-128467830293" ; 
+ String add = "TX8BF429hr7qK1Te8UWLxD9xbumtX11111" ; 
+ String count = "2" ; 
+ // 构建带参数的URL 
+ String urlWithParams = baseUrl + "?" + 
+ "apikey=" + URLEncoder . encode ( apiKey , "UTF-8" ) + 
+ "&add=" + URLEncoder . encode ( add , "UTF-8" ) + 
+ "&count=" + URLEncoder . encode ( value , "UTF-8" ) ; 
+ // 创建URL对象 
+ URL obj = new URL ( urlWithParams ) ; 
+ // 打开连接 
+ HttpURLConnection connection = ( HttpURLConnection ) obj . openConnection ( ) ; 
+ // 设置请求方式为GET 
+ connection . setRequestMethod ( "GET" ) ; 
+ // 获取响应码 
+ int responseCode = connection . getResponseCode ( ) ; 
+ System . out . println ( "Response Code: " + responseCode ) ; 
+ // 读取响应内容 
+ BufferedReader in = new BufferedReader ( new InputStreamReader ( connection . getInputStream ( ) ) ) ; 
+ String inputLine ; 
+ StringBuilder response = new StringBuilder ( ) ; 
+ while ( ( inputLine = in . readLine ( ) ) != null ) { 
+ response . append ( inputLine ) ; 
+ } 
+ // 关闭连接 
+ in . close ( ) ; 
+ // 打印响应内容 
+ System . out . println ( "Response Content: " + response . toString ( ) ) ; 
+ } catch ( IOException e ) { 
+ e . printStackTrace ( ) ; 
+ } 
+ } 
+ } 
+ package main
+ import ( 
+ "fmt" 
+ "net/http" 
+ "net/url" 
+ ) 
+ func sendGetRequest ( ) { 
+ // 设置要访问的URL 
+ baseURL := "https://web.apitrx.com/auto" 
+ // 设置参数 
+ params := url . Values { } 
+ params . Add ( "apikey" , "83928AFB-14A5-4878-A63D-128467830293" ) 
+ params . Add ( "add" , "TX8BF429hr7qK1Te8UWLxD9xbumtX11111" ) 
+ params . Add ( "count" , "2" ) 
+ // 构建带参数的URL 
+ urlWithParams := baseURL + "?" + params . Encode ( ) 
+ // 发送GET请求 
+ response , err := http . Get ( urlWithParams ) 
+ if err != nil { 
+ fmt . Println ( "Error:" , err ) 
+ return 
+ } 
+ defer response . Body . Close ( ) 
+ // 读取响应内容 
+ body , err := io . ReadAll ( response . Body ) 
+ if err != nil { 
+ fmt . Println ( "Error reading response:" , err ) 
+ return 
+ } 
+ // 打印响应内容 
+ fmt . Println ( "Response Code:" , response . Status ) 
+ fmt . Println ( "Response Content:" , string ( body ) ) 
+ } 
+ func main ( ) { 
+ sendGetRequest ( ) 
+ } 
+ import requests
+ def send_get_request ( ) : 
+ # 设置要访问的URL 
+ url = "https://web.apitrx.com/auto" 
+ # 设置参数 
+ params = { 
+ 'apikey' : '83928AFB-14A5-4878-A63D-128467830293' , 
+ 'add' : 'TX8BF429hr7qK1Te8UWLxD9xbumtX11111' , 
+ 'count' : 2 
+ } 
+ # 发送GET请求 
+ response = requests . get ( url , params = params ) 
+ # 打印响应信息 
+ print ( "Response Code:" , response . status_code ) 
+ print ( "Response Content:" , response . text ) 
+ if __name__ == "__main__" : 
+ send_get_request ( ) 
+ <?php 
+ // 设置要访问的URL 
+ $url = 'https://web.apitrx.com/auto' ; 
+ // 设置参数 
+ $apiKey = '83928AFB-14A5-4878-A63D-128467830293' ; 
+ $add = 'TX8BF429hr7qK1Te8UWLxD9xbumtX11111' ; 
+ $count = 2 ; 
+ // 构建带参数的URL 
+ $params = [ 
+ 'apikey' => $apiKey , 
+ 'add' => $add , 
+ 'count' => $count 
+ ] ; 
+ $urlWithParams = $url . '?' . http_build_query ( $params ) ; 
+ // 发送GET请求并获取响应内容 
+ $response = file_get_contents ( $urlWithParams ) ; 
+ // 打印响应内容 
+ echo $response ; 
+ ?> 
+ curl --location 'https://web.apitrx.com/auto?apikey=83928AFB-14A5-4878-A63D-128467830293&add=TX8BF429hr7qK1Te8UWLxD9xbumtX11111&count=2'

@@ -1,0 +1,214 @@
+波场能量租赁平台 
+ 如何购买 
+ 如何下单 
+ 能量/会员API 
+ 获取ApiKey 
+ 能量下单 
+ 自动预估 
+ 查询价格 
+ 笔数下单 
+ 笔数查询 
+ 笔数编辑 
+ 笔数列表 
+ 笔数委托记录 
+ 查询余额 
+ 激活地址 
+ 速充检测 
+ 速充下单 
+ 速充查询 
+ 用户名查询 
+ 会员星星 接口地址 
+ 请求参数 
+ 返回参数 
+ 代码示例 
+ 会员订单查询 
+ 价格公示 
+ 价格公示 
+ 联系我们 
+ 联系合作 
+ # 接口地址
+ 接入须知
+ Telegarm Premium 用户名查询 和 会员开通 接口均提供两个 URL，支持 USDT 或者 TRX 付款， 星星购买 仅支持 USDT 。
+ 二级域名 gift 是 USDT 计价，请前往 https://t.me/GiftAPIBot  获取 ApiKey（推荐）
+ 二级域名 web 是实时汇率的 TRX 计价，请前往 https://t.me/XXTrxBot  获取 ApiKey
+ 根据自己需求，选择其中一种方式对接，提前在对应的机器人预存余额。
+ POST https://gift.apitrx.com/premium USDT计价，开通会员接口
+ POST https://gift.apitrx.com/stars USDT计价，购买星星接口
+ POST https://web.apitrx.com/premium TRX计价，开通会员接口
+ # 请求参数
+ 参数名称 类型 说明 示例 
+ apikey string 对应机器人获取的apikey 83928AFB-14A5-4878-A63D-128467830293 
+ username string 待开通的用户名 格式可以是 @username , username 或 https//t.me/username 
+ month string 开通的月份(premium) 3, 6, 12 目前仅支持3个月, 6个月, 12个月 
+ quantity string 购买星星的数量(stars) 最低50, 最高10000 
+ callback_url string (可选)开通成功或者失败回调的url 开通完成回调的url，POST方法，回调参数和下方返回参数一致 
+ # 返回参数
+ { 
+ "code" : 200 , 
+ "data" : { 
+ "orderId" : "202505110900376496" , 
+ "username" : "@preminum" , 
+ "nickname" : "昵称" , 
+ "month" : "3" , 
+ "quantity" : "50" , 
+ "status" : 1 , 
+ "remark" : "下单成功" , 
+ "amount" : 12.5 , 
+ "balance" : 87.5 , 
+ } , 
+ "message" : "SUCCESS" 
+ } 
+ 参数名称 类型 说明 示例 
+ code int 200下单成功，其他均为下单失败 200/500 
+ message string 提示信息 SUCCESS/ERROR 
+ data.orderId string 订单ID 202505110900376496 
+ data.username string 用户名 premium 
+ data.nickname string 昵称 jack 
+ data.month string 订阅时长 3 
+ data.quantity string 购买星星数量 50 
+ data.status int 开通状态 0开通中 1已开通 2开通失败 
+ data.remark string 备注 开通成功 
+ data.amount float 消费金额 12.5 
+ data.balance float 余额 87.5 
+ # 代码示例
+ Java 
+ Go 
+ Python 
+ Php 
+ Curl 
+ import java . io . * ; 
+ import java . net . HttpURLConnection ; 
+ import java . net . URL ; 
+ import org . json . JSONObject ; 
+ public class PostJsonRequest { 
+ public static void main ( String [ ] args ) throws Exception { 
+ URL url = new URL ( "https://gift.apitrx.com/premium" ) ; 
+ HttpURLConnection conn = ( HttpURLConnection ) url . openConnection ( ) ; 
+ conn . setRequestMethod ( "POST" ) ; 
+ conn . setRequestProperty ( "Content-Type" , "application/json" ) ; 
+ conn . setDoOutput ( true ) ; 
+ JSONObject json = new JSONObject ( ) ; 
+ json . put ( "apikey" , "83928AFB-14A5-4878-A63D-128467830293" ) ; 
+ json . put ( "username" , "premium" ) ; 
+ json . put ( "month" , "3" ) ; 
+ try ( OutputStream os = conn . getOutputStream ( ) ) { 
+ os . write ( json . toString ( ) . getBytes ( "utf-8" ) ) ; 
+ } 
+ BufferedReader br = new BufferedReader ( new InputStreamReader ( conn . getInputStream ( ) , "utf-8" ) ) ; 
+ StringBuilder sb = new StringBuilder ( ) ; 
+ String line ; 
+ while ( ( line = br . readLine ( ) ) != null ) sb . append ( line ) ; 
+ JSONObject res = new JSONObject ( sb . toString ( ) ) ; 
+ JSONObject data = res . getJSONObject ( "data" ) ; 
+ System . out . println ( "Code: " + res . getInt ( "code" ) ) ; 
+ System . out . println ( "Message: " + res . getString ( "message" ) ) ; 
+ System . out . println ( "Order ID: " + data . getString ( "orderId" ) ) ; 
+ System . out . println ( "Username: " + data . getString ( "username" ) ) ; 
+ System . out . println ( "Nickname: " + data . getString ( "nickname" ) ) ; 
+ System . out . println ( "Month: " + data . getString ( "month" ) ) ; 
+ System . out . println ( "Remark: " + data . getString ( "remark" ) ) ; 
+ System . out . println ( "Status: " + data . getInt ( "status" ) ) ; 
+ System . out . println ( "Balance: " + data . getDouble ( "balance" ) ) ; 
+ System . out . println ( "Amount: " + data . getDouble ( "amount" ) ) ; 
+ } 
+ } 
+ package main
+ import ( 
+ "bytes" 
+ "encoding/json" 
+ "fmt" 
+ "net/http" 
+ "io/ioutil" 
+ ) 
+ func main ( ) { 
+ url := "https://gift.apitrx.com/premium" 
+ payload := map [ string ] string { 
+ "apikey" : "83928AFB-14A5-4878-A63D-128467830293" , 
+ "username" : "premium" , 
+ "month" : "3" , 
+ } 
+ jsonData , _ := json . Marshal ( payload ) 
+ resp , err := http . Post ( url , "application/json" , bytes . NewBuffer ( jsonData ) ) 
+ if err != nil { 
+ panic ( err ) 
+ } 
+ defer resp . Body . Close ( ) 
+ body , _ := ioutil . ReadAll ( resp . Body ) 
+ var res struct { 
+ Code int64 `json:"code"` 
+ Message string `json:"message"` 
+ Data struct { 
+ OrderID string `json:"orderId"` 
+ Username string `json:"username"` 
+ Nickname string `json:"nickname"` 
+ Month string `json:"month"` 
+ Remark string `json:"remark"` 
+ Status int64 `json:"status"` 
+ Balance float64 `json:"balance"` 
+ Amount float64 `json:"amount"` 
+ } `json:"data"` 
+ } 
+ json . Unmarshal ( body , & res ) 
+ fmt . Println ( "Code:" , res . Code ) 
+ fmt . Println ( "Message:" , res . Message ) 
+ fmt . Println ( "Order ID:" , res . Data . OrderID ) 
+ fmt . Println ( "Username:" , res . Data . Username ) 
+ fmt . Println ( "Nickname:" , res . Data . Nickname ) 
+ fmt . Println ( "Month:" , res . Data . Month ) 
+ fmt . Println ( "Remark:" , res . Data . Remark ) 
+ fmt . Println ( "Status:" , res . Data . Status ) 
+ fmt . Println ( "Balance:" , res . Data . Balance ) 
+ fmt . Println ( "Amount:" , res . Data . Amount ) 
+ } 
+ import requests
+url = "https://gift.apitrx.com/premium" 
+payload = { 
+ "apikey" : "83928AFB-14A5-4878-A63D-128467830293" , 
+ "username" : "premium" , 
+ "month" : "3" 
+ } 
+response = requests . post ( url , json = payload ) 
+res = response . json ( ) 
+data = res [ "data" ] 
+ print ( "Code:" , res [ "code" ] ) 
+ print ( "Message:" , res [ "message" ] ) 
+ print ( "Order ID:" , data [ "orderId" ] ) 
+ print ( "Username:" , data [ "username" ] ) 
+ print ( "Nickname:" , data [ "nickname" ] ) 
+ print ( "Month:" , data [ "month" ] ) 
+ print ( "Remark:" , data [ "remark" ] ) 
+ print ( "Status:" , data [ "status" ] ) 
+ print ( "Balance:" , data [ "balance" ] ) 
+ print ( "Amount:" , data [ "amount" ] ) 
+ <?php 
+ $url = "https://gift.apitrx.com/premium" ; 
+ $data = [ 
+ "apikey" => "83928AFB-14A5-4878-A63D-128467830293" , 
+ "username" => "premium" , 
+ "month" => "3" 
+ ] ; 
+ $options = [ 
+ "http" => [ 
+ "header" => "Content-Type: application/json\r\n" , 
+ "method" => "POST" , 
+ "content" => json_encode ( $data ) 
+ ] 
+ ] ; 
+ $context = stream_context_create ( $options ) ; 
+ $response = file_get_contents ( $url , false , $context ) ; 
+ $result = json_decode ( $response , true ) ; 
+ echo "Code: " . $result [ "code" ] . "\n" ; 
+ echo "Message: " . $result [ "message" ] . "\n" ; 
+ $data = $result [ "data" ] ; 
+ echo "Order ID: " . $data [ "orderId" ] . "\n" ; 
+ echo "Username: " . $data [ "username" ] . "\n" ; 
+ echo "Nickname: " . $data [ "nickname" ] . "\n" ; 
+ echo "Month: " . $data [ "month" ] . "\n" ; 
+ echo "Remark: " . $data [ "remark" ] . "\n" ; 
+ echo "Status: " . $data [ "status" ] . "\n" ; 
+ echo "Balance: " . $data [ "balance" ] . "\n" ; 
+ echo "Amount: " . $data [ "amount" ] . "\n" ; 
+ ?> 
+ curl -s -X POST https://gift.apitrx.com/premium \
+ -H "Content-Type: application/json" \
+ -d '{"apikey":"83928AFB-14A5-4878-A63D-128467830293","username":"premium","month":"3"}'

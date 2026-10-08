@@ -1,0 +1,6 @@
+httpx==0.28.1
+Pillow==11.0.0
+pytest==8.4.2
+pytesseract==0.3.13
+python-dotenv==1.0.1
+python-telegram-bot==21.10

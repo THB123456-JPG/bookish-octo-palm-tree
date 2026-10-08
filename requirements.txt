@@ -1,0 +1,24 @@
+# 运行依赖 —— 服务器上先装这个
+#
+#   pip install -r requirements.txt
+#
+# 装完直接跑：python 主程序.py
+# 面板地址在 config.json 里配（默认 127.0.0.1:8080）
+
+requests>=2.31          # 所有对外 HTTP 请求（Telegram、TronGrid、OKX、上游 API）
+certifi>=2024.0         # HTTPS 根证书。★ 打包成 exe 时必须一起带上，见 .spec
+Pillow>=10.0            # 记账机器人画 TRC20 地址核对图（ledger/trc20.py）
+
+# ★ 下面这个只有 ledger/price.py 在用，而那个模块是当初从
+#   python-telegram-bot 版抄过来时没改完的死代码（异步 + await message...），
+#   ledger_bot.py 导入了但一次都没调用。
+#   留着是因为 ledger_bot.py 有 `from ledger import ... price ...` ——
+#   不装的话整个记账机器人会导入失败。
+#   想瘦身的话：把 price.py 里那两个 async 函数删掉、把 import httpx 删掉，
+#   再从 ledger_bot.py 的 import 行里去掉 price，这个依赖就能一起去掉。
+httpx>=0.27
+
+# ---------- 只有打包 exe 才需要 ----------
+# pip install pyinstaller
+# pyinstaller "TG客服多开版.spec" --noconfirm
+# pyinstaller>=6.0

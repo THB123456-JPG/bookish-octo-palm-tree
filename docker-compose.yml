@@ -1,0 +1,36 @@
+# 一键起服务：
+#     docker compose up -d
+#
+# 看日志：docker compose logs -f
+# 重启：  docker compose restart
+# 停掉：  docker compose down
+#
+# ★ 用之前先在宿主机上跑一次 `sudo bash deploy.sh`（或手动改 config.json），
+#   把 host 设成 0.0.0.0、密码设好 —— 配置文件是挂载进去的。
+# ★ bots.json / merchants.json / data/ 也挂出来，删容器、重建镜像都不丢数据。
+
+services:
+  panel:
+    build: .
+    image: tgpanel
+    container_name: tgpanel
+    restart: unless-stopped
+
+    ports:
+      # 左边是宿主机端口，想换改这里
+      - "8080:8080"
+
+    volumes:
+      # 配置和数据都留在宿主机上，容器可以随便重建
+      - ./config.json:/app/config.json
+      - ./bots.json:/app/bots.json
+      - ./merchants.json:/app/merchants.json
+      - ./data:/app/data
+      - ./运行日志.txt:/app/运行日志.txt
+
+    # 崩了能看到原因，别让它反复重启到看不见日志
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

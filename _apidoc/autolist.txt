@@ -1,0 +1,179 @@
+波场能量租赁平台 
+ 如何购买 
+ 如何下单 
+ 能量/会员API 
+ 获取ApiKey 
+ 能量下单 
+ 自动预估 
+ 查询价格 
+ 笔数下单 
+ 笔数查询 
+ 笔数编辑 
+ 笔数列表 接口地址 
+ 请求参数 
+ 返回参数 
+ 代码示例 
+ 笔数委托记录 
+ 查询余额 
+ 激活地址 
+ 速充检测 
+ 速充下单 
+ 速充查询 
+ 用户名查询 
+ 会员星星 
+ 会员订单查询 
+ 价格公示 
+ 价格公示 
+ 联系我们 
+ 联系合作 
+ # 接口地址
+ POST https://web.apitrx.com/list
+ # 请求参数
+ 参数名称 类型 说明 示例 
+ apikey string TG机器人获取的apikey 83928AFB-14A5-4878-A63D-128467830293 
+ receiver string 购买笔数能量的波场地址(可选，不传该参数，默认返回所有已购买列表) TX8BF429hr7qK1Te8UWLxD9xbumtX11111 
+ current int 页码 1 
+ pageSize int 每页数量 20 
+ # 返回参数
+ { 
+ "code" : 200 , 
+ "data" : [ 
+ { 
+ "orderId" : 202512211429050459 , 
+ "orderType" : 2 , 
+ "receiver" : "TKmPvaHQJirYwFdxpfuEJ1V52KDNw11111" , 
+ "totalCount" : 9 , 
+ "finishCount" : 4 , 
+ "stayCount" : 0 , 
+ "remainingCount" : 5 , 
+ "status" : 3 , 
+ "createdAt" : 1766296985 
+ } , 
+ { 
+ "orderId" : 202512211333513023 , 
+ "orderType" : 1 , 
+ "receiver" : "TKmPvaHQJirYwFdxpfuEJ1V52KDNw11111" , 
+ "totalCount" : 10 , 
+ "finishCount" : 4 , 
+ "stayCount" : 0 , 
+ "remainingCount" : 6 , 
+ "status" : 2 , 
+ "createdAt" : 1766296671 
+ } ] , 
+ "message" : "查询成功" , 
+ "total" : 2 
+ } 
+ 参数名称 类型 说明 示例 
+ code int 200成功，其他为查询失败 200/500 
+ message string 提示信息 查询成功 
+ data[0].orderId int 订单ID 202512211429050459 
+ data[0].orderType int 笔数类型 1笔数套餐 2智能笔数 3账号代扣131k计1笔 4账号代扣131k计2笔 
+ data[0].receiver string 接收地址 TKmPvaHQJirYwFdxpfuEJ1V52KDNw11111 
+ data[0].totalCount int 总笔数 10 
+ data[0].finishCount int 完成笔数 4 
+ data[0].stayCount int 滞留笔数 0 
+ data[0].remainingCount int 剩余笔数 6 
+ data[0].status int 0关闭 1运行中 2结束 3取消 1 
+ data[0].createdAt int 下单时间(秒) 1766296985 
+ # 代码示例
+ Java 
+ Go 
+ Python 
+ Php 
+ Curl 
+ import java . io . * ; 
+ import java . net . HttpURLConnection ; 
+ import java . net . URL ; 
+ import org . json . JSONObject ; 
+ public class PostJsonRequest { 
+ public static void main ( String [ ] args ) throws Exception { 
+ URL url = new URL ( "https://web.apitrx.com/list" ) ; 
+ HttpURLConnection conn = ( HttpURLConnection ) url . openConnection ( ) ; 
+ conn . setRequestMethod ( "POST" ) ; 
+ conn . setRequestProperty ( "Content-Type" , "application/json" ) ; 
+ conn . setDoOutput ( true ) ; 
+ JSONObject json = new JSONObject ( ) ; 
+ json . put ( "apikey" , "83928AFB-14A5-4878-A63D-128467830293" ) ; 
+ json . put ( "receiver" , "TX8BF429hr7qK1Te8UWLxD9xbumtX11111" ) ; 
+ json . put ( "current" , 1 ) ; 
+ json . put ( "pageSize" , 20 ) ; 
+ try ( OutputStream os = conn . getOutputStream ( ) ) { 
+ os . write ( json . toString ( ) . getBytes ( "utf-8" ) ) ; 
+ } 
+ BufferedReader br = new BufferedReader ( new InputStreamReader ( conn . getInputStream ( ) , "utf-8" ) ) ; 
+ StringBuilder sb = new StringBuilder ( ) ; 
+ String line ; 
+ while ( ( line = br . readLine ( ) ) != null ) sb . append ( line ) ; 
+ JSONObject res = new JSONObject ( sb . toString ( ) ) ; 
+ System . out . println ( "Code: " + res . getInt ( "code" ) ) ; 
+ System . out . println ( "Message: " + res . getString ( "message" ) ) ; 
+ } 
+ } 
+ package main
+ import ( 
+ "bytes" 
+ "encoding/json" 
+ "fmt" 
+ "net/http" 
+ "io/ioutil" 
+ ) 
+ func main ( ) { 
+ url := "https://web.apitrx.com/list" 
+ payload := map [ string ] interface { 
+ "apikey" : "83928AFB-14A5-4878-A63D-128467830293" , 
+ "receiver" : "TX8BF429hr7qK1Te8UWLxD9xbumtX11111" , 
+ "current" : 1 , 
+ "pageSize" : 20 
+ } 
+ jsonData , _ := json . Marshal ( payload ) 
+ resp , err := http . Post ( url , "application/json" , bytes . NewBuffer ( jsonData ) ) 
+ if err != nil { 
+ panic ( err ) 
+ } 
+ defer resp . Body . Close ( ) 
+ body , _ := ioutil . ReadAll ( resp . Body ) 
+ var res struct { 
+ Code int64 `json:"code"` 
+ Message string `json:"message"` 
+ } 
+ json . Unmarshal ( body , & res ) 
+ fmt . Println ( "Code:" , res . Code ) 
+ fmt . Println ( "Message:" , res . Message ) 
+ } 
+ import requests
+url = "https://web.apitrx.com/list" 
+payload = { 
+ "apikey" : "83928AFB-14A5-4878-A63D-128467830293" , 
+ "receiver" : "TX8BF429hr7qK1Te8UWLxD9xbumtX11111" , 
+ "current" : 1 , 
+ "pageSize" : 20 
+ } 
+response = requests . post ( url , json = payload ) 
+res = response . json ( ) 
+data = res [ "data" ] 
+ print ( "Code:" , res [ "code" ] ) 
+ print ( "Message:" , res [ "message" ] ) 
+ <?php 
+ $url = "https://web.apitrx.com/list" ; 
+ $data = [ 
+ "apikey" => "83928AFB-14A5-4878-A63D-128467830293" , 
+ "receiver" => "TX8BF429hr7qK1Te8UWLxD9xbumtX11111" , 
+ "current" => 1 , 
+ "pageSize" => 20 
+ ] ; 
+ $options = [ 
+ "http" => [ 
+ "header" => "Content-Type: application/json\r\n" , 
+ "method" => "POST" , 
+ "content" => json_encode ( $data ) 
+ ] 
+ ] ; 
+ $context = stream_context_create ( $options ) ; 
+ $response = file_get_contents ( $url , false , $context ) ; 
+ $result = json_decode ( $response , true ) ; 
+ echo "Code: " . $result [ "code" ] . "\n" ; 
+ echo "Message: " . $result [ "message" ] . "\n" ; 
+ ?> 
+ curl -s -X POST https://web.apitrx.com/list \
+ -H "Content-Type: application/json" \
+ -d '{"apikey":"83928AFB-14A5-4878-A63D-128467830293","receiver":"TX8BF429hr7qK1Te8UWLxD9xbumtX11111","current":1,"pageSize":20}'

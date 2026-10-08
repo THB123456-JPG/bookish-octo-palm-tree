@@ -1,0 +1,15 @@
+# ★ shell 脚本必须是 LF 换行。
+#   Windows 上编辑后如果变成 CRLF，Linux 上跑会报
+#   「/usr/bin/env: 'bash\r': No such file or directory」—— 很难查。
+*.sh text eol=lf
+
+# 这几个按字节走，别让 git 去猜
+*.exe binary
+*.png binary
+*.jpg binary
+
+# 让 git 别把 JSON 的换行也改了（配置文件的 diff 好看点）
+*.json text eol=lf
+*.py   text eol=lf
+*.html text eol=lf
+*.md   text eol=lf

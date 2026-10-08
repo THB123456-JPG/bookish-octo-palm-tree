@@ -1,0 +1,12 @@
+{
+  "id": "把服务商给你的那串填这里",
+  "token": "BotFather 给你的 token（数字:字母数字）",
+  "note": "我的记账机器人",
+
+  "admin_ids": [],
+
+  "report": {
+    "url": "把服务商给你的地址填这里",
+    "enabled": true
+  }
+}

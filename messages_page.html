@@ -1,0 +1,873 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>群消息记录</title>
+
+<!-- 万一有人把这一页加到手机桌面：图标和名字跟主面板一样，
+     点开进的是主面板（manifest 里 start_url 是 /） -->
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#0f1420">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="TG面板">
+
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#0d1117;color:#e6edf3;
+     font:14px/1.6 -apple-system,"Segoe UI",Roboto,"Microsoft YaHei",sans-serif}
+a{color:#58a6ff}
+button{background:#238636;border:0;color:#fff;border-radius:6px;padding:7px 14px;
+       cursor:pointer;font-size:13px}
+button:hover{filter:brightness(1.12)}
+button.gray{background:#30363d}
+button:disabled{opacity:.5;cursor:not-allowed}
+input,select{background:#0d1117;border:1px solid #30363d;color:#e6edf3;
+             border-radius:6px;padding:7px 10px;font-size:13px;outline:none}
+input:focus,select:focus{border-color:#388bfd}
+.muted{color:#8b949e;font-size:12px}
+
+#top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+     padding:12px 18px;border-bottom:1px solid #21262d;background:#161b26;
+     position:sticky;top:0;z-index:5}
+#top h1{font-size:16px;margin:0;white-space:nowrap}
+#wrap{display:flex;height:calc(100vh - 58px);overflow:hidden}
+
+#side{width:260px;flex:0 0 260px;border-right:1px solid #21262d;
+      overflow-y:auto;background:#11161f}
+#side .item{padding:10px 14px;border-bottom:1px solid #1b2129;cursor:pointer;
+            display:flex;gap:8px;align-items:center}
+#side .item:hover{background:#1a2130}
+#side .item.on{background:#1f2937;border-left:3px solid #3fb950}
+#side .item .txt{flex:1;min-width:0}
+#side .item b{display:block;white-space:nowrap;overflow:hidden;
+              text-overflow:ellipsis;font-weight:600}
+#side .item .muted{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#side .item.unread b{color:#fff}
+#side .item .pin{font-size:12px;flex:0 0 auto}
+/* 未读角标 */
+.badge{background:#da3633;color:#fff;border-radius:9px;padding:1px 7px;
+       font-size:11px;font-weight:600;flex:0 0 auto;line-height:16px}
+.badge.dot{padding:0;width:9px;height:9px;border-radius:50%}
+
+/* 右键菜单 */
+#ctxmenu{position:fixed;z-index:60;background:#1c2331;border:1px solid #30363d;
+         border-radius:8px;padding:5px 0;min-width:150px;display:none;
+         box-shadow:0 8px 24px rgba(0,0,0,.5)}
+#ctxmenu div{padding:8px 14px;cursor:pointer;font-size:13px}
+#ctxmenu div:hover{background:#243044}
+
+/* 图片放大：双击看大图（截图类消息经常看不清） */
+.msg img{cursor:zoom-in}
+#lightbox{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:200;
+          display:none;align-items:center;justify-content:center;
+          overflow:hidden}
+#lightbox img{max-width:96vw;max-height:92vh;cursor:grab;
+              box-shadow:0 10px 40px rgba(0,0,0,.7);border-radius:4px;
+              user-select:none;-webkit-user-drag:none}
+#lightbox img.zoomed{cursor:grab}
+#lightbox img.dragging{cursor:grabbing}
+#lbHint{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);
+        color:#c9d1d9;background:rgba(22,27,38,.9);border:1px solid #30363d;
+        padding:7px 16px;border-radius:20px;font-size:12px;
+        white-space:nowrap;pointer-events:none}
+#lbClose{position:fixed;top:16px;right:20px;background:rgba(22,27,38,.9);
+         border:1px solid #30363d;color:#e6edf3;border-radius:50%;
+         width:38px;height:38px;font-size:20px;line-height:1;cursor:pointer}
+
+/* 消息区：从上往下排，新的在**最下面**；自己的消息靠右（像微信） */
+#main{flex:1;overflow-y:auto;padding:14px 18px;
+      display:flex;flex-direction:column;gap:12px}
+.msg{display:flex;max-width:100%}
+.msg.right{justify-content:flex-end}
+.msg .col{max-width:min(680px,74%);display:flex;flex-direction:column;
+          align-items:flex-start}
+.msg.right .col{align-items:flex-end}
+.msg .meta{font-size:12px;color:#8b949e;margin:0 4px 4px;display:flex;
+           gap:6px;flex-wrap:wrap;align-items:center}
+.msg .who{color:#c9d1d9;font-weight:600}
+.msg .bubble{background:#1c2331;border:1px solid #262d3a;border-radius:10px;
+             padding:8px 12px;max-width:100%;word-break:break-word}
+.msg.right .bubble{background:#1f4d33;border-color:#2a6344}
+.msg .body{white-space:pre-wrap;word-break:break-word}
+.msg img{max-width:320px;max-height:320px;border-radius:6px;
+         border:1px solid #30363d;margin-top:6px;display:block}
+.tag{background:#21262d;border-radius:4px;padding:1px 6px;font-size:11px;color:#8b949e}
+.empty{padding:60px 20px;text-align:center;color:#8b949e;line-height:2}
+
+#login{position:fixed;inset:0;background:#0d1117;display:flex;
+       align-items:center;justify-content:center;z-index:50}
+#login .box{background:#161b26;border:1px solid #30363d;border-radius:12px;
+            padding:28px;width:340px}
+#login h2{margin:0 0 16px;font-size:17px}
+#login input{width:100%;margin-bottom:12px}
+#login button{width:100%}
+#toast{position:fixed;left:50%;bottom:32px;transform:translateX(-50%);
+       background:#238636;color:#fff;padding:10px 20px;border-radius:8px;
+       display:none;z-index:99}
+</style>
+</head>
+<body>
+
+<div id="login" style="display:none">
+  <div class="box">
+    <h2>📜 群消息记录</h2>
+    <p class="muted" style="margin-top:0">这个页面只有管理员能看</p>
+    <input id="pw" type="password" placeholder="管理密码"
+           onkeydown="if(event.key==='Enter')doLogin()">
+    <button onclick="doLogin()">登录</button>
+    <p class="muted" id="loginMsg" style="margin-bottom:0"></p>
+  </div>
+</div>
+
+<div id="top">
+  <h1>📜 群消息记录</h1>
+  <select id="bot" onchange="switchBot()" style="min-width:200px"></select>
+  <button id="arcToggle" class="gray" onclick="arcToggleClick()">📜 记录</button>
+  <input id="q" placeholder="搜关键词 / 人名" style="width:180px"
+         onkeydown="if(event.key==='Enter')loadMsgs()">
+  <button class="gray" onclick="loadMsgs()">搜索</button>
+  <button class="gray" onclick="reload()">刷新</button>
+  <label class="muted" style="display:flex;align-items:center;gap:5px;
+         cursor:pointer;user-select:none;white-space:nowrap">
+    <input type="checkbox" id="live" checked onchange="liveToggle()"
+           style="width:auto;margin:0">
+    <span id="dot" style="color:#3fb950">●</span> 实时
+  </label>
+  <span class="muted" id="stat"></span>
+  <span style="flex:1"></span>
+  <a href="/" style="font-size:13px">← 回到面板</a>
+</div>
+
+<div id="newbar" style="display:none;position:fixed;bottom:26px;left:50%;
+     transform:translateX(-50%);z-index:8">
+  <button onclick="jumpBottom()" style="background:#1f6feb">
+    ↓ <span id="newcount">0</span> 条新消息
+  </button>
+</div>
+
+<div id="wrap">
+  <div id="side"><div class="empty">加载中…</div></div>
+  <div id="main"><div class="empty">加载中…</div></div>
+</div>
+
+<div id="lightbox">
+  <img id="lbImg" alt="">
+  <button id="lbClose" onclick="closeLb()">×</button>
+  <div id="lbHint">滚轮缩放 · 拖动平移 · 双击复位 · Esc/点背景关闭</div>
+</div>
+
+<div id="ctxmenu"></div>
+<div id="toast"></div>
+
+<script>
+var PW = localStorage.getItem('panel_pw') || '';
+var TOK = localStorage.getItem('panel_token') || '';
+var BOTS = [], BID = '', CHAT = '', LIMIT = 300;
+
+function headers(){
+  var h = {'Content-Type':'application/json'};
+  if(TOK) h['X-Panel-Token'] = TOK;
+  if(PW)  h['X-Panel-Pass']  = PW;
+  return h;
+}
+
+function api(path, opts){
+  opts = opts || {};
+  opts.headers = Object.assign(headers(), opts.headers||{});
+  return fetch(path, opts).then(function(r){
+    return r.json().then(function(d){
+      if(r.status === 401){ throw new Error(d.error || '登录已过期'); }
+      return d;
+    });
+  });
+}
+
+function toast(msg){
+  var t = document.getElementById('toast');
+  t.textContent = msg; t.style.display = 'block';
+  clearTimeout(t._t);
+  t._t = setTimeout(function(){ t.style.display = 'none'; }, 2600);
+}
+
+function esc(s){
+  return String(s==null?'':s).replace(/[&<>"']/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+
+/* ★★ jsq()：往「内联事件的字符串参数」里塞值时必须用它，esc() 在这里**没用**。
+   见 panel_page.html 里同名函数的完整说明（存储型 XSS，2026-09-29）。
+   ★ 纯文本上下文继续用 esc()。 */
+function jsq(s){
+  return String(s==null?'':s).replace(/[\\'"<>&\n\r\u2028\u2029]/g, function(c){
+    return '\\u' + ('000' + c.charCodeAt(0).toString(16)).slice(-4);
+  });
+}
+
+function fmt(iso){
+  if(!iso) return '';
+  var d = new Date(iso);
+  if(isNaN(d.getTime())) return iso;
+  var p = function(n){ return (n<10?'0':'')+n; };
+  return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '
+       + p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());
+}
+
+/* ---------- 登录 ---------- */
+function doLogin(){
+  var v = document.getElementById('pw').value;
+  if(!v) return;
+  PW = v; TOK = '';
+  api('/api/bots').then(function(d){
+    if(!d.ok) throw new Error(d.error || '登录失败');
+    if(d.me.role !== 'admin') throw new Error('这个页面只有管理员能用');
+    localStorage.setItem('panel_pw', PW);
+    document.getElementById('login').style.display = 'none';
+    boot(d);
+  }).catch(function(e){
+    PW = '';
+    document.getElementById('loginMsg').textContent = e.message || '登录失败';
+  });
+}
+
+/* ---------- 启动 ---------- */
+/* ★ 只有这两种能开记录 —— 跟后端 core.ARCHIVE_TYPES 和面板里那个
+   ARCHIVE_TYPES 保持一致，改要一起改。
+   （之前这里漏了过滤，结果 USDT/商城机器人也出现在下拉里） */
+var ARCHIVE_TYPES = ['ledger'];
+
+function boot(pre){
+  var pick = function(d){
+    BOTS = (d.bots || []).filter(function(b){
+      return ARCHIVE_TYPES.indexOf(b.type) >= 0;
+    });
+    // 开着记录的排前面 —— 没开的点进去也是空的，别占最显眼的位置
+    BOTS.sort(function(a, b){
+      var ea = (a.archive && a.archive.enabled) ? 0 : 1;
+      var eb = (b.archive && b.archive.enabled) ? 0 : 1;
+      return ea - eb;
+    });
+    if(!BOTS.length){
+      document.getElementById('side').innerHTML =
+        '<div class="empty">没有可记录的机器人</div>';
+      document.getElementById('main').innerHTML =
+        '<div class="empty">只有记账机器人和客服机器人能开消息记录<br><br>'
+        + '<span class="muted">先去面板的「📜 群消息记录」卡片上开启</span></div>';
+      return;
+    }
+    var want = new URLSearchParams(location.search).get('bot');
+    // 优先用链接里指定的；没指定就用第一个「开着记录」的
+    var firstOn = BOTS.filter(function(b){
+      return b.archive && b.archive.enabled;
+    })[0];
+    BID = want && BOTS.some(function(b){ return b.id === want; })
+        ? want : (firstOn || BOTS[0]).id;
+    var sel = document.getElementById('bot');
+    sel.innerHTML = '';
+    BOTS.forEach(function(b){
+      var o = document.createElement('option');
+      o.value = b.id;
+      o.textContent = b.note + '（' + (b.archive && b.archive.enabled
+          ? '记录中' : '未开启') + '）';
+      if(b.id === BID) o.selected = true;
+      sel.appendChild(o);
+    });
+    startLive();          // ★ 无条件启动 —— 之前写在 if(!pre) 里，
+                          //   pre 是接口返回（永远真值），结果轮询压根没起来
+    renderArcToggle();
+    loadChats();
+  };
+  if(pre) pick(pre); else api('/api/bots').then(pick).catch(showErr);
+}
+
+// 用户自己滚回底部 → 把攒着的新消息放出来
+document.addEventListener('scroll', function(e){
+  if(e.target && e.target.id === 'main' && nearBottom() && PENDING.length){
+    jumpBottom();
+  }
+}, true);   // ★ 用捕获：scroll 事件不冒泡，得在捕获阶段接
+
+function showErr(e){
+  document.getElementById('main').innerHTML =
+    '<div class="empty">' + esc(e.message || '读取失败') + '</div>';
+}
+
+function switchBot(){
+  BID = document.getElementById('bot').value;
+  CHAT = '';
+  document.getElementById('q').value = '';
+  PENDING = []; hideNewBar();
+  renderArcToggle();
+  loadChats();
+}
+
+function reload(){ loadChats(document.getElementById('q').value); }
+
+/* ---------- 开/关记录（就在这一页里操作，不用回面板）---------- */
+function curBot(){
+  return BOTS.filter(function(b){ return b.id === BID; })[0] || null;
+}
+
+function renderArcToggle(){
+  var b = curBot();
+  var btn = document.getElementById('arcToggle');
+  if(!btn) return;
+  if(!b){ btn.style.display = 'none'; return; }
+  btn.style.display = '';
+  var on = !!(b.archive && b.archive.enabled);
+  btn.className = on ? '' : 'gray';
+  btn.textContent = on
+    ? ('📜 记录中 · ' + ((b.archive && b.archive.keep_days) || 7) + ' 天')
+    : '📜 开启记录';
+  btn.title = on ? '正在记录，点一下关掉' : '把这个机器人的消息记到你自己的电脑上';
+}
+
+function arcToggleClick(){
+  var b = curBot();
+  if(!b) return;
+  var on = !!(b.archive && b.archive.enabled);
+  var body = {enabled: !on};
+  if(!on){
+    var d = prompt('记录保留多少天？（1-365，到期自动删）', '7');
+    if(d === null) return;
+    body.keep_days = parseInt(d, 10) || 7;
+  } else if(!confirm('关掉之后不再记录新消息。\n已经记下的还在（到保留期自动删）。\n\n确定关掉吗？')){
+    return;
+  }
+  api('/api/archive/' + BID + '/config',
+      {method:'POST', body: JSON.stringify(body)}).then(function(d){
+    if(!d.ok){ toast(d.error || '设置失败'); return; }
+    if(!b.archive) b.archive = {};
+    b.archive.enabled = d.enabled;
+    if(body.keep_days) b.archive.keep_days = body.keep_days;
+    // 下拉里的「（记录中/未开启）」也要跟着变
+    var sel = document.getElementById('bot');
+    var opt = sel.options[sel.selectedIndex];
+    if(opt) opt.textContent = b.note + '（' + (d.enabled ? '记录中' : '未开启') + '）';
+    renderArcToggle();
+    if(d.enabled && d.need_privacy_off){
+      toast('已开启。★ 还得去 BotFather 关掉 Group Privacy，否则收不到群里的普通消息');
+    } else {
+      toast(d.enabled ? '已开启记录' : '已关闭记录');
+    }
+  }).catch(function(){ toast('设置失败'); });
+}
+
+/* ---------- 已读/置顶（存在浏览器里，按机器人分开）---------- */
+var LAST_SEEN = {};       // {会话id: 看到哪一刻}
+var UNREAD = {};          // {会话id: 未读条数}
+var PINNED = [];          // [会话id]，置顶的排在前面
+var CHATS = [];           // 最近一次拿到的会话列表
+
+function lsKey(name){ return 'panel_' + name + '_' + BID; }
+
+function loadPrefs(){
+  try{
+    LAST_SEEN = JSON.parse(localStorage.getItem(lsKey('seen')) || '{}') || {};
+    PINNED = JSON.parse(localStorage.getItem(lsKey('pinned')) || '[]') || [];
+  }catch(e){ LAST_SEEN = {}; PINNED = []; }
+  if(!Array.isArray(PINNED)) PINNED = [];
+}
+
+function saveSeen(){
+  try{ localStorage.setItem(lsKey('seen'), JSON.stringify(LAST_SEEN)); }catch(e){}
+}
+
+function savePinned(){
+  try{ localStorage.setItem(lsKey('pinned'), JSON.stringify(PINNED)); }catch(e){}
+}
+
+function isPinned(id){ return PINNED.indexOf(String(id)) >= 0; }
+
+function pinChat(id){
+  id = String(id);
+  if(isPinned(id)) PINNED = PINNED.filter(function(x){ return x !== id; });
+  else PINNED.unshift(id);
+  savePinned();
+  renderSide();
+  hideCtx();
+}
+
+/* ---------- 右键菜单 ---------- */
+function showCtx(ev, chatId){
+  ev.preventDefault();
+  var m = document.getElementById('ctxmenu');
+  var pin = isPinned(chatId);
+  m.innerHTML = '<div onclick="pinChat(\'' + jsq(chatId) + '\')">'
+              + (pin ? '📌 取消置顶' : '📌 置顶这个会话') + '</div>'
+              + '<div onclick="markRead(\'' + jsq(chatId)
+              + '\')">✅ 标记已读</div>';
+  m.style.display = 'block';
+  // 别超出右/下边界
+  var w = m.offsetWidth, h = m.offsetHeight;
+  m.style.left = Math.min(ev.clientX, window.innerWidth - w - 8) + 'px';
+  m.style.top = Math.min(ev.clientY, window.innerHeight - h - 8) + 'px';
+}
+
+function hideCtx(){ document.getElementById('ctxmenu').style.display = 'none'; }
+
+document.addEventListener('click', hideCtx);
+document.addEventListener('contextmenu', function(e){
+  // 只在会话项上弹自己的菜单，其他地方用浏览器默认的
+  if(!e.target.closest('#side .item')) hideCtx();
+});
+document.addEventListener('keydown', function(e){ if(e.key === 'Escape') hideCtx(); });
+
+function markRead(chatId){
+  chatId = String(chatId);
+  var c = CHATS.filter(function(x){ return String(x.chat_id) === chatId; })[0];
+  LAST_SEEN[chatId] = c ? (c.last_ts || '') : '';
+  UNREAD[chatId] = 0;
+  saveSeen();
+  renderSide();
+  hideCtx();
+}
+
+/* ---------- 会话列表 ---------- */
+function loadChats(q){
+  if(!BID) return;
+  document.getElementById('side').innerHTML = '<div class="empty">加载中…</div>';
+  document.getElementById('main').innerHTML = '<div class="empty">加载中…</div>';
+  loadPrefs();
+  api('/api/archive/' + BID + '/chats').then(function(d){
+    if(!d.ok) throw new Error(d.error || '读取失败');
+    CHATS = d.chats || [];
+    var s = d.stats || {};
+    document.getElementById('stat').textContent =
+      '共 ' + (s.count||0) + ' 条' +
+      (s.media_bytes ? '，图片 ' + (s.media_bytes/1048576).toFixed(1) + ' MB' : '') +
+      (s.first ? '，' + fmt(s.first).slice(0,10) + ' 起' : '');
+    if(!CHATS.length){
+      document.getElementById('side').innerHTML = '<div class="empty">没有会话</div>';
+      document.getElementById('main').innerHTML =
+        '<div class="empty">还没有记录到消息<br><br>'
+        + '<span class="muted">检查一下：<br>'
+        + '① 机器人是否已经拉进群<br>'
+        + '② 是否去 BotFather 关掉了 Group Privacy<br>'
+        + '③ 群里发条消息试试</span></div>';
+      return;
+    }
+    refreshUnread();
+    loadMsgs(q);
+  }).catch(function(e){
+    document.getElementById('side').innerHTML = '<div class="empty">读取失败</div>';
+    showErr(e);
+  });
+}
+
+/* 未读数问服务端要（浏览器关掉再开也能接上） */
+function refreshUnread(){
+  // ★ 第一次打开这个机器人：把现有会话都标成「已读」当基线。
+  //   不这么做的话，一堆历史记录全顶着红点，真正的新消息反而看不出来。
+  if(!Object.keys(LAST_SEEN).length){
+    CHATS.forEach(function(c){ LAST_SEEN[String(c.chat_id)] = c.last_ts || ''; });
+    saveSeen();
+  }
+  var seen = {};
+  CHATS.forEach(function(c){
+    seen[String(c.chat_id)] = LAST_SEEN[String(c.chat_id)] || '';
+  });
+  api('/api/archive/' + BID + '/unread?seen='
+      + encodeURIComponent(JSON.stringify(seen)))
+    .then(function(d){
+      if(!d.ok) return;
+      UNREAD = d.unread || {};
+      renderSide();
+      updateTitle();
+    }).catch(function(){});
+}
+
+function renderSide(){
+  var side = document.getElementById('side');
+  if(!CHATS.length) return;
+  // ★ 置顶的排前面，其余保持原来的「最近发言」顺序
+  var ordered = CHATS.slice().sort(function(a, b){
+    var pa = isPinned(a.chat_id) ? 0 : 1, pb = isPinned(b.chat_id) ? 0 : 1;
+    if(pa !== pb) return pa - pb;
+    if(pa === 0) return PINNED.indexOf(String(a.chat_id))
+                       - PINNED.indexOf(String(b.chat_id));
+    return 0;
+  });
+  var total = 0;
+  ordered.forEach(function(c){ total += (UNREAD[String(c.chat_id)] || 0); });
+  var h = '<div class="item' + (CHAT ? '' : ' on') + '" onclick="pickChat(\'\')">'
+        + '<div class="txt"><b>全部会话</b><div class="muted">'
+        + (document.getElementById('stat').textContent || '') + '</div></div>'
+        + (total ? '<span class="badge">' + (total > 99 ? '99+' : total) + '</span>' : '')
+        + '</div>';
+  ordered.forEach(function(c){
+    var id = String(c.chat_id);
+    var n = UNREAD[id] || 0;
+    h += '<div class="item' + (CHAT === id ? ' on' : '') + (n ? ' unread' : '')
+       + '" onclick="pickChat(\'' + jsq(id) + '\')"'
+       + ' oncontextmenu="showCtx(event,\'' + jsq(id) + '\')"'
+       + ' title="右键可以置顶">'
+       + (isPinned(id) ? '<span class="pin">📌</span>' : '')
+       + '<div class="txt"><b>' + esc(c.title) + '</b>'
+       + '<div class="muted">' + c.count + ' 条 · ' + fmt(c.last_ts).slice(5, 16)
+       + '</div></div>'
+       + (n ? '<span class="badge">' + (n > 99 ? '99+' : n) + '</span>' : '')
+       + '</div>';
+  });
+  side.innerHTML = h;
+}
+
+function updateTitle(){
+  var total = 0;
+  Object.keys(UNREAD).forEach(function(k){ total += UNREAD[k] || 0; });
+  document.title = (total ? '(' + (total > 99 ? '99+' : total) + ') ' : '')
+                 + '群消息记录';
+}
+
+function pickChat(id){
+  CHAT = id;
+  PENDING = []; hideNewBar();
+  loadChats(document.getElementById('q').value);
+}
+
+/* ---------- 消息 ---------- */
+var SEEN = {};            // '会话|消息id' → 1，用来去重（轮询会重复带游标那条）
+var CURSOR = '';          // 已经拿到的最新时间，轮询从这个时间往后要
+var PENDING = [];         // 用户在看下面时攒着的新消息
+var LIVE_TIMER = null;
+var KIND_NAMES = {photo:'图片',document:'文件',video:'视频',voice:'语音',
+  audio:'音频',sticker:'贴纸',animation:'动图',contact:'联系人',
+  location:'位置',new_chat_members:'成员加入',left_chat_member:'成员退出'};
+
+function keyOf(m){ return m.chat_id + '|' + m.message_id; }
+
+function msgHtml(m){
+  var kindName = KIND_NAMES[m.kind];
+  // ★ 机器人主人（你自己）的消息靠右，别人的靠左 —— 像微信那样
+  var own = !!m.is_owner;
+  return '<div class="msg' + (own ? ' right' : '') + '" data-key="'
+    + esc(keyOf(m)) + '">'
+    + '<div class="col">'
+    + '<div class="meta">'
+    // ★ 主人这条原来标「我」，改成**昵称 + 用户名**（跟面板页一致、
+    //   也跟左边那些人一样）：主人可能有好几个号，标「我」分不清是谁。
+    //   ★ **不要数字 id**
+    + '<span class="who">' + esc(m.display_name || m.username
+        || m.user_id || '未知') + '</span>'
+    + (m.username ? ' <span class="muted">@' + esc(m.username) + '</span>' : '')
+    + (kindName && m.kind !== 'text' ? ' <span class="tag">' + kindName + '</span>' : '')
+    + (m.edited ? ' <span class="muted">（已编辑）</span>' : '')
+    + ' <span class="muted">' + fmt(m.ts).slice(5) + '</span>'
+    + ' <span class="muted">· ' + esc(m.chat_title) + '</span>'
+    + '</div>'
+    + '<div class="bubble">'
+    + '<div class="body">' + esc(m.text) + '</div>'
+    + (m.media ? '<img data-name="' + esc(m.media) + '">'
+               : (m.has_photo
+                  ? '<div class="muted" data-pending="1" style="margin-top:5px">'
+                    + '[图片下载中…]</div>' : ''))
+    + '</div></div></div>';
+}
+
+/* 消息区自己能滚，所以判断「在不在底部」要看 #main，不能看 window */
+function mainEl(){ return document.getElementById('main'); }
+
+function nearBottom(){
+  var el = mainEl();
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 140;
+}
+
+function scrollBottom(smooth){
+  var el = mainEl();
+  el.scrollTo({top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto'});
+}
+
+/* 图是后台线程慢慢下的，下好之后页面得自己补上 —— 不能让用户手动刷新。
+   每轮轮询顺便看一眼：还有没有停在「下载中」的，有就去把最新的几十条重取一遍，
+   把已经下好的那些换成真图。 */
+function refreshPendingMedia(){
+  if(!document.querySelector('#main [data-pending]')) return;
+  api('/api/archive/' + BID + '/messages?limit=60&chat='
+      + encodeURIComponent(CHAT || '')).then(function(d){
+    if(!d.ok) return;
+    var byKey = {};
+    (d.messages || []).forEach(function(m){ byKey[keyOf(m)] = m; });
+    var changed = false;
+    Array.prototype.forEach.call(
+        document.querySelectorAll('#main .msg[data-key]'), function(el){
+      var m = byKey[el.getAttribute('data-key')];
+      if(!m || !m.media) return;
+      var ph = el.querySelector('[data-pending]');
+      if(!ph) return;
+      var img = document.createElement('img');
+      img.setAttribute('data-name', m.media);
+      ph.replaceWith(img);
+      changed = true;
+    });
+    if(changed) loadImages();
+  }).catch(function(){});
+}
+
+function loadMsgs(q){
+  if(!BID) return;
+  if(q === undefined) q = document.getElementById('q').value;
+  q = q || '';
+  document.getElementById('q').value = q;
+  SEEN = {}; CURSOR = ''; PENDING = [];
+  hideNewBar();
+  document.getElementById('main').innerHTML = '<div class="empty">加载中…</div>';
+  var url = '/api/archive/' + BID + '/messages?limit=' + LIMIT
+          + '&chat=' + encodeURIComponent(CHAT || '')
+          + '&q=' + encodeURIComponent(q);
+  api(url).then(function(d){
+    if(!d.ok) throw new Error(d.error || '读取失败');
+    var rows = d.messages || [];
+    // 有搜索词时不做实时 —— 结果被过滤过，混进新消息反而看不懂
+    SEARCHING = !!q;
+    rows.forEach(function(m){ SEEN[keyOf(m)] = 1; });
+    CURSOR = newestOf(rows);
+    if(!rows.length){
+      document.getElementById('main').innerHTML = SEARCHING
+        ? '<div class="empty">没有符合条件的消息</div>'
+        : '<div class="empty">还没有记录到消息<br><br>'
+          + '<span class="muted">检查一下：<br>'
+          + '① 机器人是否已经拉进群（客服机器人是客户私聊它）<br>'
+          + '② 记账机器人是否去 BotFather 关掉了 Group Privacy<br>'
+          + '③ 群里发条消息试试</span></div>';
+      return;
+    }
+    // ★ 接口给的是「新的在前」，页面要**从上往下、新的在最下面**，所以翻过来
+    document.getElementById('main').innerHTML =
+      rows.slice().reverse().map(msgHtml).join('');
+    scrollBottom();
+    loadImages();
+    // ★ 打开某个具体会话 = 已读。
+    //   但「全部会话」那个总览**不算已读** —— 不然一直开着总览页，
+    //   所有红点都会被清掉，未读提醒就没意义了
+    if(CHAT && !SEARCHING){
+      LAST_SEEN[String(CHAT)] = CURSOR || newestOf(rows);
+      UNREAD[String(CHAT)] = 0;
+      saveSeen();
+      renderSide();
+      updateTitle();
+    }
+  }).catch(showErr);
+}
+
+function newestOf(rows){
+  var m = '';
+  rows.forEach(function(x){ if(x.ts && x.ts > m) m = x.ts; });
+  return m;
+}
+
+/* ---------- 实时刷新（轮询，不用手动点）---------- */
+var SEARCHING = false;
+
+function liveOn(){
+  return document.getElementById('live').checked && !SEARCHING;
+}
+
+function liveToggle(){
+  var on = document.getElementById('live').checked;
+  document.getElementById('dot').style.color = on ? '#3fb950' : '#8b949e';
+  if(!on){ hideNewBar(); }
+  tick();
+}
+
+function startLive(){
+  if(LIVE_TIMER) clearInterval(LIVE_TIMER);
+  // 3 秒一次，够「实时」了；本地 sqlite 查询很便宜
+  LIVE_TIMER = setInterval(tick, 3000);
+}
+
+function tick(){
+  if(!BID || !liveOn()) return;
+  if(document.hidden) return;          // 页面在后台就别刷了，省资源
+  // ★ 不加 chat 过滤：未读要按**每个会话**分别算，得把新消息全捞回来
+  var url = '/api/archive/' + BID + '/since?limit=200'
+          + '&after=' + encodeURIComponent(CURSOR || '');
+  api(url).then(function(d){
+    if(!d.ok || SEARCHING) return;
+    if(d.newest && d.newest > CURSOR) CURSOR = d.newest;
+    var fresh = (d.messages || []).filter(function(m){ return !SEEN[keyOf(m)]; });
+    if(!fresh.length) return;
+    fresh.forEach(function(m){ SEEN[keyOf(m)] = 1; });
+
+    // ① 没在看的会话：算未读
+    var hit = false;
+    fresh.forEach(function(m){
+      var cid = String(m.chat_id);
+      if(cid === String(CHAT)) return;              // 正在看的，不算未读
+      if(m.ts > (LAST_SEEN[cid] || '')){
+        UNREAD[cid] = (UNREAD[cid] || 0) + 1;
+        hit = true;
+      }
+    });
+    // ② 正在看的那个会话的新消息：显示出来，并标记已读
+    var mine = CHAT
+      ? fresh.filter(function(m){ return String(m.chat_id) === String(CHAT); })
+      : [];
+    if(mine.length){
+      LAST_SEEN[String(CHAT)] = newestOf(mine);
+      UNREAD[String(CHAT)] = 0;
+      saveSeen();
+      hit = true;
+      // mine 里是「新的在前」，加到列表末尾前要翻成「老的在前」
+      mine = mine.slice().reverse();
+      if(nearBottom()){
+        appendMsgs(mine);          // 已经贴着底部 → 直接追加并跟着滚
+      } else {
+        // 用户正在往上翻老消息 —— 别硬拽到底，攒着给他个提示
+        PENDING = PENDING.concat(mine);
+        showNewBar();
+      }
+    }
+    if(hit){ renderSide(); updateTitle(); }
+  }).catch(function(){});              // 轮询失败不弹错，下一轮再试
+  // 顺手把还没下好的图补上（后台线程下完要显出来，不能让用户手动刷）
+  refreshPendingMedia();
+}
+
+/* 新消息追加到**最下面**，并跟着滚到底 */
+function appendMsgs(rows){
+  var main = mainEl();
+  if(main.querySelector('.empty')) main.innerHTML = '';
+  main.insertAdjacentHTML('beforeend', rows.map(msgHtml).join(''));
+  var last = main.lastElementChild;
+  if(last){
+    last.style.transition = 'background .6s';
+    last.style.background = '#1a2a1f';
+    setTimeout(function(){ last.style.background = ''; }, 500);
+  }
+  scrollBottom();
+  loadImages();
+}
+
+function showNewBar(){
+  document.getElementById('newcount').textContent = PENDING.length;
+  document.getElementById('newbar').style.display = 'block';
+}
+
+function hideNewBar(){
+  document.getElementById('newbar').style.display = 'none';
+}
+
+function jumpBottom(){
+  var rows = PENDING;
+  PENDING = [];
+  hideNewBar();
+  if(rows.length) appendMsgs(rows);
+  else scrollBottom(true);
+}
+
+/* ---------- 图片放大（双击看大图）---------- */
+var LB = {scale: 1, x: 0, y: 0, drag: null, open: false};
+
+function openLb(src){
+  if(!src) return;
+  var img = document.getElementById('lbImg');
+  img.src = src;
+  LB = {scale: 1, x: 0, y: 0, drag: null, open: true};
+  applyLb();
+  document.getElementById('lightbox').style.display = 'flex';
+}
+
+function closeLb(){
+  LB.open = false;
+  document.getElementById('lightbox').style.display = 'none';
+  document.getElementById('lbImg').removeAttribute('src');
+}
+
+function applyLb(){
+  var img = document.getElementById('lbImg');
+  img.style.transform = 'translate(' + LB.x + 'px,' + LB.y + 'px) scale('
+                      + LB.scale + ')';
+  img.classList.toggle('zoomed', LB.scale !== 1);
+}
+
+function lbReset(){
+  LB.scale = 1; LB.x = 0; LB.y = 0;
+  applyLb();
+}
+
+(function bindLb(){
+  var box = document.getElementById('lightbox');
+  var img = document.getElementById('lbImg');
+
+  // 双击图片 → 放大（这是用户点名要的）
+  document.addEventListener('dblclick', function(e){
+    var t = e.target;
+    if(t && t.tagName === 'IMG' && t.closest('#main')){ openLb(t.src); return; }
+    if(t && t.id === 'lbImg'){ lbReset(); }      // 大图里再双击 → 复位
+  });
+
+  // 点背景关掉（点图片本身不关）
+  box.addEventListener('click', function(e){
+    if(e.target === box) closeLb();
+  });
+  document.addEventListener('keydown', function(e){
+    if(e.key === 'Escape' && LB.open) closeLb();
+  });
+
+  // 滚轮缩放，以鼠标位置为中心
+  box.addEventListener('wheel', function(e){
+    if(!LB.open) return;
+    e.preventDefault();
+    var s2 = Math.min(8, Math.max(1, LB.scale * (e.deltaY < 0 ? 1.15 : 1/1.15)));
+    var r = img.getBoundingClientRect();
+    var cx = e.clientX - (r.left + r.width / 2);
+    var cy = e.clientY - (r.top + r.height / 2);
+    LB.x -= cx * (s2 / LB.scale - 1);
+    LB.y -= cy * (s2 / LB.scale - 1);
+    LB.scale = s2;
+    if(s2 === 1){ LB.x = 0; LB.y = 0; }
+    applyLb();
+  }, {passive: false});
+
+  // 放大后可以拖着看
+  img.addEventListener('mousedown', function(e){
+    if(LB.scale === 1) return;
+    e.preventDefault();
+    LB.drag = {x: e.clientX - LB.x, y: e.clientY - LB.y};
+    img.classList.add('dragging');
+  });
+  document.addEventListener('mousemove', function(e){
+    if(!LB.drag) return;
+    LB.x = e.clientX - LB.drag.x;
+    LB.y = e.clientY - LB.drag.y;
+    applyLb();
+  });
+  document.addEventListener('mouseup', function(){
+    LB.drag = null;
+    img.classList.remove('dragging');
+  });
+})();
+
+/* ★ 图片必须用 fetch 带密码头取回来再转 blob —— <img src> 发不了自定义头，
+   密码不能写进 URL（会被日志记下来） */
+function loadImages(){
+  var list = document.querySelectorAll('#main img[data-name]:not([src])');
+  Array.prototype.forEach.call(list, function(img){
+    var name = img.getAttribute('data-name');
+    fetch('/api/archive/' + BID + '/media/' + encodeURIComponent(name),
+          {headers: headers()})
+      .then(function(r){ if(!r.ok) throw new Error(r.status); return r.blob(); })
+      .then(function(b){ img.src = URL.createObjectURL(b); })
+      .catch(function(){ img.replaceWith(document.createTextNode('[图片打不开]')); });
+  });
+}
+
+/* ---------- 入口 ---------- */
+if(PW || TOK){
+  api('/api/bots').then(function(d){
+    if(d.ok && d.me.role === 'admin'){ boot(d); }
+    else if(d.ok){ document.getElementById('login').style.display = 'flex';
+      document.getElementById('loginMsg').textContent = '这个页面只有管理员能用'; }
+    else { document.getElementById('login').style.display = 'flex'; }
+  }).catch(function(){ document.getElementById('login').style.display = 'flex'; });
+} else {
+  document.getElementById('login').style.display = 'flex';
+}
+</script>
+</body>
+</html>
