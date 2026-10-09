@@ -44,6 +44,8 @@ def fake(self,method,**kw):
 core.TgAPI.call=fake
 core.TgAPI.call_file=lambda *a,**kw:{'message_id':99}
 import instance_worker
+from runners.ledger import tron_chain
+tron_chain.probe=lambda key: (True, 'fake validated')
 instance_worker.main()
 '''
 
@@ -137,6 +139,23 @@ class InstanceTests(unittest.TestCase):
             self.assertEqual(json.load(response)['config']['notice'],'Isolated shop configuration')
         with urlopen(request,timeout=20) as response:
             self.assertTrue(json.load(response)['ok'])
+
+    def test_separate_key_bindings_forward_to_child_and_survive_restart(self):
+        bot = self.add(305)
+        self.update(bot, '/admin ' + bot['bind_code'], 111)
+        self.wait(lambda: self.manager.find(bot['id']).get('owner_id') == 111)
+        keys = ['FAKE_CHILD_KEY_A', 'FAKE_CHILD_KEY_B']
+        for index, key in enumerate(keys):
+            result = miniapp.action(self.manager, bot, 111, 'tronkeys', {'keys':[key]})
+            self.assertEqual(result['custom_count'], index + 1)
+        data_file = instances.folder(bot)/'data'/(bot['id']+'.json')
+        self.assertEqual(core.load_json(str(data_file), {})['tron_keys'], keys)
+        self.assertFalse((Path(core.DATA_DIR)/(bot['id']+'.json')).exists())
+        self.control(bot, 'restart')
+        self.wait(lambda: self.manager.runners[bot['id']].info().get('status') == 'running')
+        result = miniapp.action(self.manager, bot, 111, 'overview', {})['tron']
+        self.assertEqual(result['custom_count'], 2)
+        self.assertEqual(len(result['masked_keys']), 2)
 
     def control(self, bot, action):
         request = Request('http://127.0.0.1:%s/api/bots/%s/%s' %

@@ -619,7 +619,13 @@ def tron_action(mgr, bot, uid, name, payload):
             not isinstance(k, str) or not re.fullmatch(r'[A-Za-z0-9_\-]{8,256}', k) for k in keys):
         raise ValueError('请填写查询 API Key，最多 %d 把，每行一把' % MAX_KEYS)
     keys = list(dict.fromkeys(keys))
+    with mgr.lock:
+        current = watcher.custom_keys()
+        if keys and len(set(current + keys)) > MAX_KEYS:
+            raise ValueError('最多绑定 %d 把 API Key，如需更换请先清除绑定' % MAX_KEYS)
     for key in keys:
+        if key in current:
+            continue
         try:
             good, _ = tc.probe(key)
         except Exception:
@@ -627,6 +633,9 @@ def tron_action(mgr, bot, uid, name, payload):
         if not good:
             raise ValueError('API Key 验证未通过，原配置已保留。请检查复制内容、查询权限或稍后重试。')
     with mgr.lock:
+        keys = list(dict.fromkeys(watcher.custom_keys() + keys)) if keys else []
+        if len(keys) > MAX_KEYS:
+            raise ValueError('最多绑定 %d 把 API Key，如需更换请先清除绑定' % MAX_KEYS)
         updated = dict(runner.data)
         updated.pop('tron_key', None)
         if keys:

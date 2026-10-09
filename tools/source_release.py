@@ -23,7 +23,7 @@ TESTS = ['_test_source_release', '_test_nodes', '_test_server_monitor', '_test_a
     '_test_client_onboarding', '_test_customer_config', '_test_miniapp', '_test_customer_ui',
     '_test_personnel', '_test_disable_cutoff', '_test_entry_formats', '_test_personal_pricing',
     '_test_owner_statistics', '_test_group_ready', '_test_hosted_mode', '_test_solo_config',
-    '_test_miniapp_scope']
+    '_test_miniapp_scope', '_test_tron_miniapp']
 
 
 def allowed(name):
@@ -127,13 +127,14 @@ def identity(root):
         try:
             with urlopen('https://api.telegram.org/bot'+bot['token']+'/getMe', timeout=20) as response:
                 me = json.load(response)
-            if not me.get('ok') or me['result']['username'] != bot['username']:
+            if not me.get('ok') or me['result']['username'] != bot['username'] or \
+               str(me['result']['id']) != bot['token'].split(':', 1)[0]:
                 raise ValueError()
         except Exception:
             raise RuntimeError('Read-only Telegram identity verification failed') from None
         names.append(bot['username'])
-    if 'ceshihao1bot' not in names:
-        raise ValueError('Designated project bot is missing')
+    if not names:
+        raise ValueError('No registered bots to verify')
     return names
 
 

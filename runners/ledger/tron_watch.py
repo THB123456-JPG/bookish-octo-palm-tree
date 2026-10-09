@@ -430,7 +430,6 @@ class TronWatch:
             lines += [
             '⏰ 创建时间：' + tc.when(account.get('create_time')),
             '🕒 最近操作：' + tc.when(max(operations, default=0)),
-            '时间：UTC+8 · 仅 TRX/USDT',
         ]
         # ★ 没配 Key 就顺势把「怎么配」讲清楚（尤其刚被限流过的时候）
         if buyer > 0 and include_hint:

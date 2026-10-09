@@ -58,6 +58,24 @@ class Tests(unittest.TestCase):
                      'static/icon-192.png','solo/config.example.json','tools/source_release.py'):
             self.assertTrue(release.allowed(name), name)
 
+    def test_identity_uses_current_registered_bots_and_checks_telegram_id(self):
+        self.write(self.root, 'bots.json', json.dumps({'bots':[
+            {'username':'renamed_bot', 'token':'123:FAKE_IDENTITY'}]}))
+        service = ('ActiveState=active\nWorkingDirectory=%s\nExecStart=%s\n'
+                   'KillMode=control-group\n') % (self.root, self.root/'主程序.py')
+        def response(telegram_id):
+            return io.BytesIO(json.dumps({'ok':True, 'result':{
+                'username':'renamed_bot', 'id':telegram_id}}).encode())
+        with patch.object(release.subprocess, 'check_output', return_value=service), \
+                patch.object(release, 'urlopen', side_effect=lambda *a, **kw: response(123)):
+            self.assertEqual(release.identity(self.root), ['renamed_bot'])
+            with patch.object(release, 'urlopen', return_value=response(456)):
+                with self.assertRaisesRegex(RuntimeError, 'identity verification failed'):
+                    release.identity(self.root)
+            self.write(self.root, 'bots.json', json.dumps({'bots':[]}))
+            with self.assertRaisesRegex(ValueError, 'No registered bots'):
+                release.identity(self.root)
+
     def test_global_release_syncs_registered_instances_only(self):
         self.write(self.local,'output/local-only.py','artifact')
         plan = self.stage()
