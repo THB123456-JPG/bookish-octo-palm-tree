@@ -210,3 +210,4 @@ echo "  卸载：   sudo bash install.sh --uninstall"
 echo
 echo "  下一步：把机器人拉进群，然后用你自己的 Telegram"
 echo "          私聊它发  /admin 绑定码（绑定码在日志里，或者问服务商）"
+echo "  小程序：私聊机器人，点击「配置中心」，无需客户域名或入站端口。"

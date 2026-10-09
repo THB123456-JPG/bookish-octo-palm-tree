@@ -4,6 +4,8 @@
   "note": "我的记账机器人",
 
   "admin_ids": [],
+  "miniapp_base_url": "https://服务商面板域名",
+  "tron_api_keys": [],
 
   "report": {
     "url": "把服务商给你的地址填这里",

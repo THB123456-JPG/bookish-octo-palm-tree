@@ -1,12 +1,26 @@
 # 运行时会变的东西 —— 别提交，每个人的都不一样
 data/
+instances/
 运行日志.txt
 config.json
 bots.json
 merchants.json
+nodes.json
+node.json
+node-runtime.json
 
 # Python / 打包产物
 __pycache__/
 *.pyc
 build/
 *.spec.bak
+
+# Local development output and credentials
+.venv/
+output/
+.playwright-cli/
+tools/preview_auth.json
+.env
+.env.*
+*.pem
+*.key

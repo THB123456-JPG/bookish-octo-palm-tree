@@ -1,0 +1,162 @@
+[
+  {
+    "path": "_test_personnel.py",
+    "origin": "/home/ubuntu/tgpanel_checkpoints/20261009_app_interactions/tests/_test_personnel.py",
+    "sha256": "2789829caedf6ccab7006d050ac1a13075ad8122352b5115f02c2d135029d374"
+  },
+  {
+    "path": "_test_personal_pricing.py",
+    "origin": "/home/ubuntu/tgpanel_checkpoints/20261009_app_interactions/tests/_test_personal_pricing.py",
+    "sha256": "8bcaaeaf03232935db965fd14815e023bac1d6992fbcc9405deb5268b868eda1"
+  },
+  {
+    "path": "_test_owner_statistics.py",
+    "origin": "/home/ubuntu/tgpanel_checkpoints/20261009_app_interactions/tests/_test_owner_statistics.py",
+    "sha256": "50b4f65e7bc6edaaf1f05548b740383b973827cb39d21dbc8957a7a4b07dbfb4"
+  },
+  {
+    "path": "_test_customer_ui.py",
+    "origin": "/home/ubuntu/tgpanel_checkpoints/20261009_app_interactions/tests/_test_customer_ui.py",
+    "sha256": "bce974b94aa41ba1f544cbf34059e0663762718f6bbaa2d616a6025453c1cdd7"
+  },
+  {
+    "path": "_test_group_ready.py",
+    "origin": "/home/ubuntu/tgpanel_checkpoints/20261009_app_interactions/tests/_test_group_ready.py",
+    "sha256": "38ea890a8407a188bf6f244993c9b544541ae57b0bb929c22dc8afd9dccd733c"
+  },
+  {
+    "path": "_test_miniapp.py",
+    "origin": "/home/ubuntu/tgpanel_checkpoints/20261009_app_interactions/tests/_test_miniapp.py",
+    "sha256": "f5778590b7e0e96c37ddf8a73cebee4fd3e613feab2c18480b0e3684a34fae08"
+  },
+  {
+    "path": "_test_customer_config.py",
+    "origin": "/home/ubuntu/tgpanel_checkpoints/20261009_app_interactions/tests/_test_customer_config.py",
+    "sha256": "b0a6467873da6ac654cbf774ab68f56df3256b768fe11479bffa01498020cfe4"
+  },
+  {
+    "path": "_test_entry_formats.py",
+    "origin": "Local isolated accounting display and source reply regression",
+    "sha256": "bcd5c322e970075c4d7665ea12d67e7f0f1384b981f42bd13097bf10c2111ee8"
+  },
+  {
+    "path": "_test_disable_cutoff.py",
+    "origin": "/home/ubuntu/tgpanel_checkpoints/20261009_app_interactions/tests/_test_disable_cutoff.py",
+    "sha256": "606ad98403ac37f04eef9b282cf7d1483bc0d6708c57e340f5ea126b32897b79"
+  },
+  {
+    "path": "tools/preview_miniapp.py",
+    "origin": "E:\\CodexProjects\\tgpanel-customer-miniapp\\tools\\preview_miniapp.py",
+    "sha256": "4ab2a17358ef1960c4296628ff16eea0e9af07cd7f93c5f4570536e8ebdde8c0"
+  },
+  {
+    "path": "tools/check_config.py",
+    "origin": "E:\\CodexProjects\\tgpanel-customer-miniapp\\tools\\check_config.py",
+    "sha256": "e5d24086ddc8d79cadb9404efb397ffd04c35da145a480a0164c5e4e6538861c"
+  },
+  {
+    "path": "tools/check_interactions.py",
+    "origin": "Local isolated architecture, role boundary and interaction regression",
+    "sha256": "7f694c588544df5c641931040cf8bd804940ca145d61ef9b43f3295e52219b42"
+  },
+  {
+    "path": "tools/miniapp_syntax_check.js",
+    "origin": "E:\\CodexProjects\\tgpanel-customer-miniapp\\tools\\miniapp_syntax_check.js",
+    "sha256": "465d4dfa8823789c8642c6847d39ac2d4d07dc2ce82bd5187661535a37954b81"
+  },
+  {
+    "path": "_test_bot_instances.py",
+    "origin": "Local isolated architecture, role boundary and interaction regression",
+    "sha256": "9b6c3b62821dea948e23a9a320a20010945016352689d30621bbe2e514f3a572"
+  },
+  {
+    "path": "_test_client_onboarding.py",
+    "origin": "Created locally for independent bot instances and reply previews",
+    "sha256": "45326d3558e937b8a0223883779b4b8b576fd75f6f6b1e2f51d0ceee9e3adba1"
+  },
+  {
+    "path": "_test_archive_replies.py",
+    "origin": "Created locally for independent bot instances and reply previews",
+    "sha256": "1a135496232de546706675a53de8e0e23e2b31586c1f326fc746e646941216de"
+  },
+  {
+    "path": "tools/check_archive_replies.js",
+    "origin": "Created locally for independent bot instances and reply previews",
+    "sha256": "b61f0237f8c9190fa663006451b914b03f930c1a9f595034e2280d3a02fbdaef"
+  },
+  {
+    "path": "tools/server_instance_deploy.py",
+    "origin": "Created locally for independent bot instances and reply previews",
+    "sha256": "82151be929eec7bf5a6286d22239e0e86a907618904af52fda22372b5f23cd3c"
+  },
+  {
+    "path": "tools/server_panel_reply_deploy.py",
+    "origin": "Created locally for global main-panel reply display verification",
+    "sha256": "18b19b0e96eaacb8073a3855153da613e37f139cee2fb3f6925088e7a2b356d3"
+  },
+  {
+    "path": "_test_tron_miniapp.py",
+    "origin": "Local isolated architecture, role boundary and interaction regression",
+    "sha256": "3eb08e2308bc15b6d8ba1e2cd7fdfe42344c419bd1103d87268529d6ac9ca748"
+  },
+  {
+    "path": "_test_ledger_core.py",
+    "origin": "Local isolated regression for strict entries, API key binding and watch alerts",
+    "sha256": "7e70ec0abdc2007682c8b0ae98fbf74709180286a14657f56baaae75ae2825f4"
+  },
+  {
+    "path": "_test_ledger_tron.py",
+    "origin": "Local isolated regression for strict entries, API key binding and watch alerts",
+    "sha256": "16ddc9aaac73d1a5967b7715862249e6f7bb70657a93009f07fdbebef345f9f3"
+  },
+  {
+    "path": "_test_miniapp_scope.py",
+    "origin": "Local isolated architecture, role boundary and interaction regression",
+    "sha256": "2403710ee4410a9381afa28a0f1cc70c7574f75681495c6e6e3e48525ef70d17"
+  },
+  {
+    "path": "_test_ledger_group.py",
+    "origin": "Local isolated architecture, role boundary and interaction regression",
+    "sha256": "4fc879f3e21721e31e5e837fa48cd92322093a724fe94a775674d4bad2312a87"
+  },
+  {
+    "path": "tools/check_bill_navigation.py",
+    "origin": "Local isolated architecture, role boundary and interaction regression",
+    "sha256": "a9f53488eae3ac187cc0aa2da342900ac2bbe609637ac66c7768e52aa0f2e5b7"
+  },
+  {
+    "path": "tools/check_miniapp_scope.py",
+    "origin": "Local isolated architecture, role boundary and interaction regression",
+    "sha256": "71384ebfff469c31915ec848f3e8a337ca5da4e83fc756cb363726b33429de35"
+  },
+  {
+    "path": "_test_appearance.py",
+    "origin": "local authorized permissions and message UI regression",
+    "sha256": "5708fdd1f8c4c79d5a899176dc68e71dc3cbe6c2e5c6034bda07e5fc54152d9b"
+  },
+  {
+    "path": "tools/check_message_updates.py",
+    "origin": "local authorized permissions and message UI regression",
+    "sha256": "f8b29085f34b521cc3814516fbaef2b6d9c2277fbe9495412abf27f803b52d45"
+  },
+  {
+    "path": "tools/check_native_footer.py",
+    "origin": "local authorized native footer regression",
+    "sha256": "7a9bc370d6ce23f3f086b46917bf24e9a9754eafaef0afb9fa0ea2d8578fcbe6"
+  },
+  {
+    "path": "tools/check_hosted_actions.js",
+    "origin": "Local isolated customer deployment and configuration bridge regression",
+    "sha256": "33ee14b6d37e802ae8e7a74c5d41f441fffcf613f89e5939adb3fb38b27ec323"
+  },
+  {
+    "path": "_test_solo_config.py",
+    "origin": "Local isolated customer deployment and configuration bridge regression",
+    "sha256": "70c502e2772451dbb8b34b86c4215c1bf38b7600fcad1c60e84547b7729c99bf"
+  },
+  {
+    "path": "tools/check_selfhosted_config.py",
+    "origin": "Local isolated customer deployment and configuration bridge regression",
+    "sha256": "3c7c16ef6f558d19fa0d5326b5d394893e0bfcbad5643a2f6607c0ad05783986"
+  }
+]

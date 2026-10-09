@@ -206,10 +206,11 @@ def handle_get(h, path):
             rows = arc.messages_since(
                 after,
                 chat_id=(q.get('chat') or [''])[0],
-                limit=(q.get('limit') or ['200'])[0])
+                limit=(q.get('limit') or ['200'])[0],
+                after_seq=(q.get('after_seq') or [None])[0])
             h._json({'ok': True,
                      'messages': _fix_owner(rows, bot),
-                     'newest': arc.newest_ts(),
+                     'newest': max((r.get('ts', '') for r in rows), default=after),
                      'stats': arc.stats()})
             return True
         # 每个会话的未读数。seen 是前端存在 localStorage 的 {会话id: 看到哪一刻}
@@ -358,6 +359,8 @@ def handle_post(h, path, me):
         unread, base = {}, {}
         n = 0
         for b in h.mgr.bots:
+            if b.get('node_id'):
+                continue
             if n >= 40:
                 break                      # 别让一次请求开几十个库
             if (b.get('type') or '') not in core.ARCHIVE_TYPES:
@@ -371,11 +374,25 @@ def handle_post(h, path, me):
             mine = seen.get(b['id'])
             if not isinstance(mine, dict) or not mine:
                 # 这个机器人用户还没打开过 → 给基线，历史记录不算未读
-                base[b['id']] = arc.baseline()
+                base[b['id']] = arc.baseline(with_seq=True)
                 unread[b['id']] = {}
             else:
                 unread[b['id']] = arc.unread_counts(mine)
-        h._json({'ok': True, 'unread': unread, 'base': base})
+        unavailable = []
+        registry = getattr(h.mgr,'nodes',None)
+        if registry:
+            import base64
+            for nid in {b['node_id'] for b in h.mgr.bots if b.get('node_id')}:
+                try:
+                    if not registry.cache.get(nid,{}).get('online'):
+                        raise OSError()
+                    own = {b['id'] for b in h.mgr.bots if b.get('node_id')==nid}
+                    result = registry.call(nid,'unread',{'seen':{k:v for k,v in seen.items() if k in own}},timeout=3)
+                    result = json.loads(base64.b64decode(result['response']['body']))
+                    unread.update(result.get('unread',{}));base.update(result.get('base',{}))
+                except (OSError,ValueError,KeyError):
+                    unavailable.append(nid)
+        h._json({'ok': True, 'unread': unread, 'base': base,'unavailable_nodes':unavailable})
         return True
 
     # ================= 记账：改配置 =================
@@ -435,7 +452,7 @@ INGEST_MAX_MEDIA = 12 * 1024 * 1024     # 单张图上限
 INGEST_MAX_EVENTS = 200                 # 一次最多收几条
 
 
-def _ingest_archive(bid, owner_id=''):
+def _ingest_archive(bid, owner_id='', bot=None):
     """打开（必要时**建**）这台机器人的归档库。
 
     ★ 跟面板那条读取路径（panel._archive_of）不一样：那个是「文件不存在
@@ -448,7 +465,7 @@ def _ingest_archive(bid, owner_id=''):
       （读的时候还会再按当前 owner_id 重算一遍，见 _fix_owner ——
         所以老库里的旧消息也能一起修好）
     """
-    p = os.path.join(core.DATA_DIR, '%s.archive.sqlite3' % bid)
+    p = os.path.join(core.bot_data_dir(bot), '%s.archive.sqlite3' % bid)
     try:
         from archive import MessageArchive
         return MessageArchive(p, owner_id=owner_id or '')
@@ -500,6 +517,23 @@ def handle_ingest(h, path):
         return True
     bid = bot['id']
 
+    if path == '/api/ingest/config':
+        if not bot.get('remote'):
+            h._json({'ok': False, 'error': '请先在面板切换为客户自建'}, 403)
+            return True
+        try:
+            h.connection.settimeout(10)
+            raw = h._raw_body(9 * 1024 * 1024)
+            body = json.loads(raw)
+            if not isinstance(body, dict) or not isinstance(body.get('reply', {}), dict):
+                raise ValueError('配置请求格式无效')
+            from miniapp import remote_requests
+            job = remote_requests(h.mgr).exchange(bid, body.get('reply'))
+            h._json({'ok': True, 'request': job})
+        except (ValueError, TypeError):
+            h._json({'ok': False, 'error': '配置请求格式无效'}, 400)
+        return True
+
     # ---------------- 图片：原始字节 ----------------
     if path == '/api/ingest/media':
         data = h._raw_body(INGEST_MAX_MEDIA)
@@ -508,7 +542,7 @@ def handle_ingest(h, path):
                      'error': '没有图片内容，或超过 %d MB'
                               % (INGEST_MAX_MEDIA // 1048576)}, 413)
             return True
-        arc = _ingest_archive(bid, bot.get('owner_id'))
+        arc = _ingest_archive(bid, bot.get('owner_id'), bot)
         if arc is None:
             h._json({'ok': False, 'error': '服务端没准备好'}, 500)
             return True
@@ -542,7 +576,7 @@ def handle_ingest(h, path):
             return True
         if len(events) > INGEST_MAX_EVENTS:
             events = events[:INGEST_MAX_EVENTS]
-        arc = _ingest_archive(bid, bot.get('owner_id'))
+        arc = _ingest_archive(bid, bot.get('owner_id'), bot)
         if arc is None:
             h._json({'ok': False, 'error': '服务端没准备好'}, 500)
             return True

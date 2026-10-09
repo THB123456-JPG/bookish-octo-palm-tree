@@ -30,6 +30,13 @@ input,select{background:#0d1117;border:1px solid #30363d;color:#e6edf3;
              border-radius:6px;padding:7px 10px;font-size:13px;outline:none}
 input:focus,select:focus{border-color:#388bfd}
 .muted{color:#8b949e;font-size:12px}
+.reply{border-left:3px solid #58a6ff;background:#58a6ff14;border-radius:4px;
+       padding:5px 8px;margin-bottom:7px;cursor:pointer;display:flex;gap:8px;align-items:center}
+.reply b{color:#79c0ff;font-size:12px}
+.reply .reply-text{white-space:pre-wrap;overflow:hidden;display:-webkit-box;
+                  -webkit-line-clamp:2;-webkit-box-orient:vertical;font-size:12px}
+.bubble .reply img{width:38px;height:38px;object-fit:cover;flex:0 0 38px;margin:0;border-radius:4px}
+.reply-focus{outline:2px solid #58a6ff;outline-offset:3px}
 
 #top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
      padding:12px 18px;border-bottom:1px solid #21262d;background:#161b26;
@@ -131,7 +138,7 @@ input:focus,select:focus{border-color:#388bfd}
   <input id="q" placeholder="搜关键词 / 人名" style="width:180px"
          onkeydown="if(event.key==='Enter')loadMsgs()">
   <button class="gray" onclick="loadMsgs()">搜索</button>
-  <button class="gray" onclick="reload()">刷新</button>
+  <button class="gray" id="refreshMessages" onclick="reload(this)">↻ 刷新</button>
   <label class="muted" style="display:flex;align-items:center;gap:5px;
          cursor:pointer;user-select:none;white-space:nowrap">
     <input type="checkbox" id="live" checked onchange="liveToggle()"
@@ -167,6 +174,7 @@ input:focus,select:focus{border-color:#388bfd}
 <script>
 var PW = localStorage.getItem('panel_pw') || '';
 var TOK = localStorage.getItem('panel_token') || '';
+var VERSION = 0, LIVE_BUSY = false, LOAD_BUSY = false;
 var BOTS = [], BID = '', CHAT = '', LIMIT = 300;
 
 function headers(){
@@ -178,10 +186,16 @@ function headers(){
 
 function api(path, opts){
   opts = opts || {};
+  opts.cache = 'no-store';
+  if(!opts.signal && typeof AbortSignal !== 'undefined') opts.signal = AbortSignal.timeout(15000);
   opts.headers = Object.assign(headers(), opts.headers||{});
   return fetch(path, opts).then(function(r){
     return r.json().then(function(d){
-      if(r.status === 401){ throw new Error(d.error || '登录已过期'); }
+      if(r.status === 401){
+        clearInterval(LIVE_TIMER);LIVE_TIMER = null; VERSION++;
+        document.getElementById('login').style.display = 'flex';
+        throw new Error(d.error || '登录已过期');
+      }
       return d;
     });
   });
@@ -306,7 +320,13 @@ function switchBot(){
   loadChats();
 }
 
-function reload(){ loadChats(document.getElementById('q').value); }
+function reload(button){
+  button = button || document.getElementById('refreshMessages');
+  button.disabled = true; button.textContent = '刷新中…';
+  Promise.resolve(loadChats(document.getElementById('q').value)).then(function(ok){
+    toast(ok === false ? '刷新失败，请重试' : '已刷新');
+  }).finally(function(){button.disabled = false;button.textContent = '↻ 刷新';});
+}
 
 /* ---------- 开/关记录（就在这一页里操作，不用回面板）---------- */
 function curBot(){
@@ -421,7 +441,7 @@ document.addEventListener('keydown', function(e){ if(e.key === 'Escape') hideCtx
 function markRead(chatId){
   chatId = String(chatId);
   var c = CHATS.filter(function(x){ return String(x.chat_id) === chatId; })[0];
-  LAST_SEEN[chatId] = c ? (c.last_ts || '') : '';
+  LAST_SEEN[chatId] = c ? {ts:c.last_ts || '', seq:c.last_seq || 0} : '';
   UNREAD[chatId] = 0;
   saveSeen();
   renderSide();
@@ -434,7 +454,10 @@ function loadChats(q){
   document.getElementById('side').innerHTML = '<div class="empty">加载中…</div>';
   document.getElementById('main').innerHTML = '<div class="empty">加载中…</div>';
   loadPrefs();
-  api('/api/archive/' + BID + '/chats').then(function(d){
+  var version = ++VERSION, bid = BID;
+  LOAD_BUSY = true;
+  return api('/api/archive/' + BID + '/chats').then(function(d){
+    if(version !== VERSION) return;
     if(!d.ok) throw new Error(d.error || '读取失败');
     CHATS = d.chats || [];
     var s = d.stats || {};
@@ -452,12 +475,13 @@ function loadChats(q){
         + '③ 群里发条消息试试</span></div>';
       return;
     }
-    refreshUnread();
-    loadMsgs(q);
+    return refreshUnread().then(function(){if(version === VERSION) return loadMsgs(q);});
   }).catch(function(e){
+    if(version !== VERSION) return;
     document.getElementById('side').innerHTML = '<div class="empty">读取失败</div>';
     showErr(e);
-  });
+    return false;
+  }).finally(function(){if(version === VERSION)LOAD_BUSY = false;});
 }
 
 /* 未读数问服务端要（浏览器关掉再开也能接上） */
@@ -465,17 +489,19 @@ function refreshUnread(){
   // ★ 第一次打开这个机器人：把现有会话都标成「已读」当基线。
   //   不这么做的话，一堆历史记录全顶着红点，真正的新消息反而看不出来。
   if(!Object.keys(LAST_SEEN).length){
-    CHATS.forEach(function(c){ LAST_SEEN[String(c.chat_id)] = c.last_ts || ''; });
+    CHATS.forEach(function(c){ LAST_SEEN[String(c.chat_id)] = {ts:c.last_ts || '', seq:c.last_seq || 0}; });
     saveSeen();
   }
   var seen = {};
   CHATS.forEach(function(c){
     seen[String(c.chat_id)] = LAST_SEEN[String(c.chat_id)] || '';
   });
-  api('/api/archive/' + BID + '/unread?seen='
+  var version = VERSION;
+  return api('/api/archive/' + BID + '/unread?seen='
       + encodeURIComponent(JSON.stringify(seen)))
     .then(function(d){
-      if(!d.ok) return;
+      if(version !== VERSION) return;
+      if(!d.ok) throw new Error(d.error || '读取失败');
       UNREAD = d.unread || {};
       renderSide();
       updateTitle();
@@ -532,6 +558,7 @@ function pickChat(id){
 
 /* ---------- 消息 ---------- */
 var SEEN = {};            // '会话|消息id' → 1，用来去重（轮询会重复带游标那条）
+var SEQ = 0;
 var CURSOR = '';          // 已经拿到的最新时间，轮询从这个时间往后要
 var PENDING = [];         // 用户在看下面时攒着的新消息
 var LIVE_TIMER = null;
@@ -540,6 +567,27 @@ var KIND_NAMES = {photo:'图片',document:'文件',video:'视频',voice:'语音'
   location:'位置',new_chat_members:'成员加入',left_chat_member:'成员退出'};
 
 function keyOf(m){ return m.chat_id + '|' + m.message_id; }
+
+function replyHtml(m){
+  var r = m.reply;
+  if(!r) return '';
+  return '<div class="reply" role="button" tabindex="0" data-reply-key="'
+    + esc(m.chat_id + '|' + r.message_id) + '" onclick="showReply(this)" onkeydown="if(event.key===\'Enter\')showReply(this)">'
+    + (r.media ? '<img data-name="' + esc(r.media) + '">' : (r.has_photo ? '<span class="muted" data-reply-pending="1">图片</span>' : ''))
+    + '<div><b>回复 ' + esc(r.display_name || r.username || '原消息') + '</b>'
+    + '<div class="reply-text">' + esc(r.text || ('[' + (KIND_NAMES[r.kind] || '消息') + ']'))
+    + '</div></div></div>';
+}
+
+function showReply(el){
+  var key = el.getAttribute('data-reply-key');
+  var target = Array.prototype.find.call(document.querySelectorAll('#main .msg[data-key]'),
+    function(node){return node.getAttribute('data-key')===key;});
+  if(!target){toast('原消息不在当前列表中，引用内容已显示在回复上方');return;}
+  target.scrollIntoView({behavior:'smooth',block:'center'});
+  target.classList.add('reply-focus');
+  setTimeout(function(){target.classList.remove('reply-focus');},1800);
+}
 
 function msgHtml(m){
   var kindName = KIND_NAMES[m.kind];
@@ -561,6 +609,7 @@ function msgHtml(m){
     + ' <span class="muted">· ' + esc(m.chat_title) + '</span>'
     + '</div>'
     + '<div class="bubble">'
+    + replyHtml(m)
     + '<div class="body">' + esc(m.text) + '</div>'
     + (m.media ? '<img data-name="' + esc(m.media) + '">'
                : (m.has_photo
@@ -586,17 +635,28 @@ function scrollBottom(smooth){
    每轮轮询顺便看一眼：还有没有停在「下载中」的，有就去把最新的几十条重取一遍，
    把已经下好的那些换成真图。 */
 function refreshPendingMedia(){
-  if(!document.querySelector('#main [data-pending]')) return;
+  if(!document.querySelector('#main [data-pending],#main [data-reply-pending]')) return;
   api('/api/archive/' + BID + '/messages?limit=60&chat='
       + encodeURIComponent(CHAT || '')).then(function(d){
-    if(!d.ok) return;
+    if(version !== VERSION || !d.ok) return;
     var byKey = {};
     (d.messages || []).forEach(function(m){ byKey[keyOf(m)] = m; });
     var changed = false;
     Array.prototype.forEach.call(
         document.querySelectorAll('#main .msg[data-key]'), function(el){
       var m = byKey[el.getAttribute('data-key')];
-      if(!m || !m.media) return;
+      if(!m) return;
+      if(m.reply && m.reply.media){
+        var quote = el.querySelector('.reply');
+        if(quote && !quote.querySelector('img')){
+          var thumb = document.createElement('img');
+          thumb.setAttribute('data-name',m.reply.media);
+          var placeholder=quote.querySelector('[data-reply-pending]');
+          if(placeholder)placeholder.remove();
+          quote.prepend(thumb);changed=true;
+        }
+      }
+      if(!m.media) return;
       var ph = el.querySelector('[data-pending]');
       if(!ph) return;
       var img = document.createElement('img');
@@ -613,19 +673,23 @@ function loadMsgs(q){
   if(q === undefined) q = document.getElementById('q').value;
   q = q || '';
   document.getElementById('q').value = q;
-  SEEN = {}; CURSOR = ''; PENDING = [];
+  var version = ++VERSION;
+  LOAD_BUSY = true; SEARCHING = !!q;
+  SEEN = {}; CURSOR = ''; SEQ = 0; PENDING = [];
   hideNewBar();
   document.getElementById('main').innerHTML = '<div class="empty">加载中…</div>';
   var url = '/api/archive/' + BID + '/messages?limit=' + LIMIT
           + '&chat=' + encodeURIComponent(CHAT || '')
           + '&q=' + encodeURIComponent(q);
-  api(url).then(function(d){
+  return api(url).then(function(d){
+    if(version !== VERSION) return;
     if(!d.ok) throw new Error(d.error || '读取失败');
     var rows = d.messages || [];
     // 有搜索词时不做实时 —— 结果被过滤过，混进新消息反而看不懂
     SEARCHING = !!q;
     rows.forEach(function(m){ SEEN[keyOf(m)] = 1; });
     CURSOR = newestOf(rows);
+    SEQ = Math.max(0, ...rows.map(m => m.archive_seq || 0));
     if(!rows.length){
       document.getElementById('main').innerHTML = SEARCHING
         ? '<div class="empty">没有符合条件的消息</div>'
@@ -645,13 +709,15 @@ function loadMsgs(q){
     //   但「全部会话」那个总览**不算已读** —— 不然一直开着总览页，
     //   所有红点都会被清掉，未读提醒就没意义了
     if(CHAT && !SEARCHING){
-      LAST_SEEN[String(CHAT)] = CURSOR || newestOf(rows);
+      LAST_SEEN[String(CHAT)] = {ts:CURSOR, seq:SEQ};
       UNREAD[String(CHAT)] = 0;
       saveSeen();
       renderSide();
       updateTitle();
     }
-  }).catch(showErr);
+    return true;
+  }).catch(function(e){if(version === VERSION)showErr(e);return false;})
+    .finally(function(){if(version === VERSION)LOAD_BUSY = false;});
 }
 
 function newestOf(rows){
@@ -676,57 +742,53 @@ function liveToggle(){
 
 function startLive(){
   if(LIVE_TIMER) clearInterval(LIVE_TIMER);
-  // 3 秒一次，够「实时」了；本地 sqlite 查询很便宜
-  LIVE_TIMER = setInterval(tick, 3000);
+  LIVE_TIMER = setInterval(tick, 2000);
 }
 
 function tick(){
-  if(!BID || !liveOn()) return;
-  if(document.hidden) return;          // 页面在后台就别刷了，省资源
-  // ★ 不加 chat 过滤：未读要按**每个会话**分别算，得把新消息全捞回来
-  var url = '/api/archive/' + BID + '/since?limit=200'
-          + '&after=' + encodeURIComponent(CURSOR || '');
-  api(url).then(function(d){
-    if(!d.ok || SEARCHING) return;
-    if(d.newest && d.newest > CURSOR) CURSOR = d.newest;
-    var fresh = (d.messages || []).filter(function(m){ return !SEEN[keyOf(m)]; });
-    if(!fresh.length) return;
-    fresh.forEach(function(m){ SEEN[keyOf(m)] = 1; });
-
-    // ① 没在看的会话：算未读
-    var hit = false;
+  if(!BID || !liveOn() || document.hidden || LIVE_BUSY || LOAD_BUSY) return;
+  var version = VERSION;
+  LIVE_BUSY = true;
+  refreshPendingMedia();
+  var url = '/api/archive/' + BID + '/since?limit=200&after_seq=' + SEQ;
+  return api(url).then(function(d){
+    if(version !== VERSION || SEARCHING) return;
+    if(!d.ok) throw new Error(d.error || '读取失败');
+    var rows = d.messages || [];
+    if(rows.length) SEQ = Math.max(...rows.map(m => m.archive_seq || 0));
+    var fresh = rows.filter(function(m){return !SEEN[keyOf(m)];});
     fresh.forEach(function(m){
-      var cid = String(m.chat_id);
-      if(cid === String(CHAT)) return;              // 正在看的，不算未读
-      if(m.ts > (LAST_SEEN[cid] || '')){
+      SEEN[keyOf(m)] = 1;
+      var cid = String(m.chat_id), mark = LAST_SEEN[cid] || '';
+      if(!m.is_bot && (typeof mark === 'object' ? m.archive_seq > mark.seq : m.ts > mark))
         UNREAD[cid] = (UNREAD[cid] || 0) + 1;
-        hit = true;
-      }
+      var c = CHATS.find(c => String(c.chat_id) === cid);
+      if(!c){c = {chat_id:cid,title:m.chat_title || cid,count:0}; CHATS.unshift(c);}
+      c.count++; c.last_ts = m.ts; c.last_seq = m.archive_seq;
     });
-    // ② 正在看的那个会话的新消息：显示出来，并标记已读
-    var mine = CHAT
-      ? fresh.filter(function(m){ return String(m.chat_id) === String(CHAT); })
-      : [];
+    var mine = CHAT ? fresh.filter(m => String(m.chat_id) === String(CHAT)) : fresh;
     if(mine.length){
-      LAST_SEEN[String(CHAT)] = newestOf(mine);
-      UNREAD[String(CHAT)] = 0;
-      saveSeen();
-      hit = true;
-      // mine 里是「新的在前」，加到列表末尾前要翻成「老的在前」
       mine = mine.slice().reverse();
       if(nearBottom()){
-        appendMsgs(mine);          // 已经贴着底部 → 直接追加并跟着滚
-      } else {
-        // 用户正在往上翻老消息 —— 别硬拽到底，攒着给他个提示
-        PENDING = PENDING.concat(mine);
-        showNewBar();
-      }
+        appendMsgs(mine);
+        if(CHAT) markDisplayed(mine);
+      } else {PENDING = PENDING.concat(mine);showNewBar();}
     }
-    if(hit){ renderSide(); updateTitle(); }
-  }).catch(function(){});              // 轮询失败不弹错，下一轮再试
-  // 顺手把还没下好的图补上（后台线程下完要显出来，不能让用户手动刷）
-  refreshPendingMedia();
+    if(fresh.length){renderSide();updateTitle();}
+    return true;
+  }).catch(function(){return false;}).finally(function(){LIVE_BUSY = false;});
 }
+
+function markDisplayed(rows){
+  LAST_SEEN[String(CHAT)] = {ts:newestOf(rows), seq:Math.max(0, ...rows.map(m => m.archive_seq || 0))};
+  UNREAD[String(CHAT)] = 0;
+  saveSeen();renderSide();updateTitle();
+}
+
+document.addEventListener('visibilitychange', function(){if(!document.hidden)tick();});
+window.addEventListener('storage', function(e){
+  if(e.key === lsKey('seen')){loadPrefs();refreshUnread();}
+});
 
 /* 新消息追加到**最下面**，并跟着滚到底 */
 function appendMsgs(rows){
@@ -756,7 +818,7 @@ function jumpBottom(){
   var rows = PENDING;
   PENDING = [];
   hideNewBar();
-  if(rows.length) appendMsgs(rows);
+  if(rows.length){appendMsgs(rows);if(CHAT)markDisplayed(rows);}
   else scrollBottom(true);
 }
 

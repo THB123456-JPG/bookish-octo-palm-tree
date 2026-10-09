@@ -81,10 +81,17 @@ class ShopRunner(BaseRunner):
                 'is_persistent': True}
 
     def send_menu(self, chat_id, text):
+        markup = self.menu()
+        try:
+            import customer_ui
+        except ImportError:
+            customer_ui = None
+        if customer_ui and customer_ui.supported(self):
+            markup = customer_ui.keyboard(self, chat_id)
         try:
             return self.api.call('sendMessage', chat_id=chat_id, text=text,
                                  disable_web_page_preview=True,
-                                 reply_markup=self.menu())
+                                 reply_markup=markup)
         except TgError as e:
             log('[%s] 发菜单失败：%s' % (self.note(), e))
             return self.send(chat_id, text)

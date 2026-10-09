@@ -253,7 +253,7 @@ def balances(rows, address):
       不然会把别人的余额显示成你的。
     """
     if not rows:
-        return '未查询到已激活账户；请核对地址。'
+        return '未查询到已激活账户；请核对地址。', {}
     if len(rows) != 1 or not isinstance(rows[0], dict):
         raise ValueError('账户数据格式异常')
     row = rows[0]

@@ -1,8 +1,0 @@
-{
-  "host": "127.0.0.1",
-  "port": 8080,
-  "password": "",
-  "merchant_host": "",
-  "welcome": "您好！请直接留言，我们会尽快回复您。",
-  "token_secret": ""
-}

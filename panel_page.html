@@ -186,6 +186,13 @@ pre.tut{background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:16
 .mb.bot .bb{background:#11161f;border-style:dashed;color:#b9c2cc}
 .bb img{max-width:300px;max-height:300px;border-radius:6px;margin-top:6px;
         display:block;cursor:zoom-in;border:1px solid #30363d}
+.msg-reply{display:flex;gap:8px;align-items:center;border-left:3px solid #58a6ff;
+           background:#58a6ff14;border-radius:4px;padding:5px 8px;margin-bottom:7px;cursor:pointer}
+.msg-reply b{color:#79c0ff;font-size:12px}
+.msg-reply-text{font-size:12px;overflow:hidden;display:-webkit-box;
+                -webkit-line-clamp:2;-webkit-box-orient:vertical}
+.bb .msg-reply img{width:38px;height:38px;object-fit:cover;flex:0 0 38px;margin:0}
+.msg-reply-focus{outline:2px solid #58a6ff;outline-offset:3px}
 /* 「上次看到这里」的分界线 —— 点进来一眼就知道从哪开始是新的 */
 .newline{text-align:center;color:#d29922;font-size:12px;padding:6px 0;
          border-top:1px dashed #6b4a10;margin:4px 0 2px}
@@ -324,6 +331,19 @@ body.chatting #memBox{flex:0 0 auto;max-height:40vh}
 #homeTip .ht-k{background:#21262d;border:1px solid #30363d;border-radius:5px;
   padding:1px 7px;margin:0 2px;white-space:nowrap;color:#e6edf3}
 #homeTip button{margin-top:16px;width:100%}
+/* Server monitor: symmetric metrics, bounded chart and compact instance rows. */
+.server-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.server-metric{text-align:center;padding:20px 10px;background:#0d1117;border:1px solid #26303f;border-radius:12px}
+.server-value{color:#e6edf3;font-size:27px;font-weight:600;margin:8px 0;font-variant-numeric:tabular-nums}
+.server-metric progress{width:100%;height:5px;accent-color:#58a6ff}
+.server-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px}
+.server-head h2{margin:0}.server-chart{width:100%;height:130px;margin:12px 0}
+#serverWorkers{overflow-x:auto}#serverWorkers th,#serverWorkers td{text-align:center}
+#serverWorkers td{white-space:nowrap}
+.node-capacity{text-align:center;background:#0d1117;border:1px solid #30363d;border-radius:12px;padding:14px;margin-top:12px}.node-monitor{margin-top:14px}.node-monitor details{margin-top:14px}.node-monitor .server-grid{margin-top:12px}.node-monitor .server-value{font-size:26px}.node-monitor .server-metric{padding:14px 8px}
+.node-list{display:grid;gap:12px;margin-top:16px}.node-item{border:1px solid var(--border,#30363d);border-radius:12px;padding:14px}.node-item .row{margin-top:10px;gap:8px}.node-item p{margin:6px 0;overflow-wrap:anywhere}.node-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px}.node-form label{display:grid;gap:6px;min-width:0}.node-form input{width:100%;min-width:0;box-sizing:border-box}.node-form .wide{grid-column:1/-1}.node-warn{color:#e3b341}.node-date{font-variant-numeric:tabular-nums}.tab[data-pane=server]{position:relative}#serverRenewBadge{position:absolute;top:6px;right:7px;width:9px;height:9px;border-radius:50%;background:#ff453a;box-shadow:0 0 0 2px #161b22}.node-actions{display:flex;gap:8px;justify-content:center;margin-top:14px}.node-actions button{flex:1}#nodeList button{white-space:nowrap}
+@media(max-width:600px){.server-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.server-value{font-size:23px}.server-metric{padding:15px 7px}#pane-server .card{padding:12px}}
+@media(max-width:420px){.node-form{grid-template-columns:minmax(0,1fr)}.node-item{padding:12px}.node-item .row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.node-item .row button{width:100%;margin:0}.node-item .row button:last-child:nth-child(odd){grid-column:1/-1}.node-form .wide{grid-column:auto}}
 </style>
 </head>
 <body>
@@ -353,20 +373,25 @@ body.chatting #memBox{flex:0 0 auto;max-height:40vh}
     <button class="tab" data-pane="merch">👥 商户管理</button>
     <button class="tab" data-pane="help">📖 使用说明</button>
     <button class="tab" data-pane="logs">🔐 登录记录</button>
+    <button class="tab" data-pane="server">◉ 服务器监控<span id="serverRenewBadge" hidden role="img" aria-label="服务器即将到期"></span></button>
+    <button class="tab" data-pane="appearance">⚙️ 全局设置</button>
   </div>
 
   <!-- ===== ① 消息记录（登录默认看到这个）=====
        三级下钻：机器人 → 群 → 群内消息 -->
   <div class="pane" id="pane-msg">
     <div id="msgLv1" class="card">
-      <h2>📋 机器人列表 <span class="cnt" id="cnt-msg"></span></h2>
+      <h2>📋 机器人列表 <span class="cnt" id="cnt-msg"></span>
+        <button class="gray sm msg-refresh" onclick="msgRefresh(this)">↻ 刷新</button></h2>
       <div id="msgBots"><div class="empty">加载中…</div></div>
     </div>
 
     <div id="msgLv2" class="card" style="display:none">
       <h2><a href="#" class="crumb" onclick="msgGoto(1);return false">📋 机器人列表</a>
         <span class="muted">/</span> <span>群消息</span>
-        <span class="cnt" id="cnt-msg2"></span></h2>
+        <span class="cnt" id="cnt-msg2"></span>
+        <button class="gray sm" onclick="msgGoto(1)">‹ 返回</button>
+        <button class="gray sm msg-refresh" onclick="msgRefresh(this)">↻ 刷新</button></h2>
       <div id="msgChats"><div class="empty">加载中…</div></div>
     </div>
 
@@ -377,9 +402,12 @@ body.chatting #memBox{flex:0 0 auto;max-height:40vh}
         <span class="muted">/</span> <span id="msgChatName"></span>
         <span class="cnt" id="cnt-msg3"></span>
         <a href="#" class="mchip" id="memChip"
-           onclick="msgToggleMembers();return false">👥 群成员</a></h2>
+           onclick="msgToggleMembers();return false">👥 群成员</a>
+        <button class="gray sm" onclick="msgGoto(2)">‹ 返回</button>
+        <button class="gray sm msg-refresh" onclick="msgRefresh(this)">↻ 刷新</button></h2>
       <div id="memBox" style="display:none"></div>
-      <div id="msgStream"><div class="empty">加载中…</div></div>
+      <button id="msgNew" class="gray sm" style="display:none" onclick="msgScrollBottom();msgMarkRead()">↓ 查看新消息</button>
+      <div id="msgStream" onscroll="if(msgNearBottom())msgMarkRead()"><div class="empty">加载中…</div></div>
     </div>
   </div>
 
@@ -454,6 +482,7 @@ body.chatting #memBox{flex:0 0 auto;max-height:40vh}
           <option value="shop">商城机器人</option>
         </select>
         <select id="duration"></select>
+        <select id="addNode" aria-label="运行服务器"><option value="">本机服务器</option></select>
         <input id="note" placeholder="备注（例如：张三-售后）">
         <input id="token" placeholder="机器人 token（BotFather 给的那串）">
         <button onclick="addBot()">添加</button>
@@ -465,14 +494,65 @@ body.chatting #memBox{flex:0 0 auto;max-height:40vh}
             回传的暗号是两边从 token 现算的，用户不用管）。 -->
       <label class="muted" style="display:flex;align-items:center;gap:8px;
                                    margin-top:12px;cursor:pointer">
-        <input type="checkbox" id="remote" style="width:auto;margin:0">
+        <input type="checkbox" id="remote" style="width:auto;margin:0" onchange="document.getElementById('addNode').disabled=this.checked">
         跑在客户自己的服务器上（本面板不运行它，消息由它回传）
       </label>
-      <div class="muted" id="typeHint">添加后系统会自动验证 token，并生成一个绑定码</div>
+      <div class="muted" id="typeHint">添加记账机器人后，系统验证 Token、生成激活码，并以机器人用户名建立独立实例。客户激活后拥有完整功能和自己的配置中心。</div>
     </div>
   </div>
 
   <!-- ===== ④ 商户管理 ===== -->
+  <div class="pane" id="pane-server" style="display:none">
+    <div class="card">
+      <div class="server-head"><h2>运行服务器</h2><div><button class="gray sm" onclick="loadServer(true)">刷新</button> <button class="sm" onclick="editNodeConnection('')">添加服务器</button></div></div>
+      <p id="serverStatus" class="muted" role="status"></p>
+      <div id="renewalAlerts" class="node-warn" role="status"></div>
+      <div id="nodeList" class="node-list"></div>
+      <details style="margin-top:16px"><summary>新服务器接入说明</summary>
+        <p class="muted">下载节点包，上传新服务器，在 Ubuntu / Debian 执行：</p>
+        <pre style="overflow-x:auto">mkdir -p ~/tgpanel-node-setup
+tar -xzf ~/tgpanel-node.tar.gz -C ~/tgpanel-node-setup
+sudo bash ~/tgpanel-node-setup/node_install.sh</pre>
+        <p class="muted">仅允许主面板 IP 访问新服务器 9443 端口，填入安装结果中的地址、密钥与指纹。设为新增默认后，新机器人在此运行。</p>
+        <button class="gray sm" onclick="downloadNode()">下载节点安装包</button>
+      </details>
+      <form id="nodeConnectionForm" hidden onsubmit="saveNodeConnection(event)">
+        <h3 id="nodeConnectionTitle">添加服务器</h3><input type="hidden" id="nodeConnectionId">
+        <div class="node-form">
+          <label>服务器名称<input id="nodeName" maxlength="40" required placeholder="例如：香港 2 号"></label>
+          <label>连接地址<input id="nodeUrl" required placeholder="https://服务器IP:9443"></label>
+          <label class="wide">连接密钥<input id="nodeKey" type="password" autocomplete="new-password" placeholder="安装时生成；编辑时留空沿用"></label>
+          <label class="wide">SHA256 证书指纹<input id="nodeFingerprint" placeholder="安装时生成的 64 位指纹"></label>
+        </div><p class="muted">密钥仅保存在服务端；连接信息不会改变已有机器人的运行位置。</p>
+        <div class="node-actions"><button type="button" class="gray" onclick="this.form.hidden=true">取消</button><button id="nodeConnectionSave">验证并保存</button></div>
+        <p id="nodeConnectionStatus" class="muted" role="status"></p>
+      </form>
+      <form id="nodeSettingsForm" hidden onsubmit="saveNodeSettings(event)">
+        <h3>名称与续费提醒</h3><input type="hidden" id="nodeSettingsId">
+        <div class="node-form">
+          <label class="wide">服务器名称<input id="nodeSettingsName" maxlength="40" required></label>
+          <label>到期时间<input type="datetime-local" id="nodeRenewAt"></label>
+          <label>提醒时间<input type="datetime-local" id="nodeRemindAt"></label>
+        </div><p class="muted">北京时间 · 留空不设置。仅在面板提示，续费后更新到期和提醒时间。</p>
+        <div class="node-actions"><button type="button" class="gray" onclick="this.form.hidden=true">取消</button><button id="nodeSettingsSave">保存</button></div>
+        <p id="nodeSettingsStatus" class="muted" role="status"></p>
+      </form>
+    </div>
+    <div class="card"><h2>实例占用</h2><div id="serverWorkers"></div></div>
+  </div>
+
+  <div class="pane" id="pane-appearance" style="display:none">
+    <div class="card">
+      <h2>小程序底部显示</h2>
+      <p class="muted">全局共用，显示在 Telegram 底部栏。最多64字；填写 @用户名 可点击联系，留空隐藏自定义文字。</p>
+      <form id="appearanceForm" onsubmit="saveAppearance(event)">
+        <label for="footerText">显示文字</label>
+        <div class="row"><input id="footerText" maxlength="64" placeholder="联系开发者@HCW2026" style="flex:1"><button id="appearanceSave" type="submit">保存</button></div>
+        <p id="appearanceStatus" class="muted" role="status"></p>
+      </form>
+    </div>
+  </div>
+
   <div class="pane" id="pane-merch" style="display:none">
     <div class="card" id="card-merch">
       <h2>👥 商户管理 <span class="cnt" id="cnt-merch"></span></h2>
@@ -534,171 +614,83 @@ body.chatting #memBox{flex:0 0 auto;max-height:40vh}
 
   <!-- ===== ⑤ 使用说明 ===== -->
   <div class="pane" id="pane-help" style="display:none">
-    <!-- ★ 这块是**给管理员看的**：里面让人「先看怎么拿到机器人」，
-         而那一节商户根本看不到，留着反而误导。
-         商户端整块隐藏，直接从「商城机器人」那节开始。 -->
-    <div class="card" data-for="admin">
-      <h2>📖 使用说明</h2>
-      <div class="hint">
-        第一次用先看「怎么拿到机器人」。下面按类型分开写，点标题展开。
-      </div>
-    </div>
-
-    <!-- ★ 每块上的 data-for 属性 = 这块给谁看。
-         商户端只显示标着 shop 的那块（applyRoleTabs 里按它隐藏），
-         其它全是管理员专属。
-         ★ 注释里别写出「属性名 + 等号 + 引号」的完整样子 ——
-           前端测试台是用正则从页面里抠这些块的，写在注释里会被当成真块。 -->
     <details class="card" data-for="admin" open>
-      <summary>🆕 怎么拿到机器人（两种方式）<button class="gray sm" style="font-weight:400"
+      <summary>🆕 添加与激活机器人<button class="gray sm" style="font-weight:400"
         onclick="event.preventDefault();event.stopPropagation();copyHelp(this)"
-        title="把这一节整段复制，直接发给对方">📋 复制</button></summary>
+        title="复制这节说明">📋 复制</button></summary>
       <div class="helpbody">
-        <b>方式一 · 直接找客服要（推荐）</b><br>
-        把你要哪种机器人告诉客服，客服会给你一个<b>机器人 token</b> 或者直接帮你配好。<br>
-        你自己只需要在 Telegram 里给机器人发一条绑定指令就完事了。<br><br>
-        <b>方式二 · 自己建一个</b><br>
-        去 Telegram 找 <code>@BotFather</code> 建机器人，把 token 给管理员，管理员在面板里添加。<br>
-        下面是详细步骤：
-      </div>
-      <div class="row" style="margin:10px 0 4px">
-        <button onclick="copyTut(TUT)">📋 复制整段教程</button>
-        <button class="gray" onclick="copyTut(TUT_MAKE)">📋 只复制「建机器人拿token」那段</button>
-      </div>
-      <div class="muted">复制后直接粘贴发给朋友，他照着做就行</div>
-      <pre class="tut" id="tut"></pre>
-    </details>
-
-    <details class="card" data-for="kefu">
-      <summary>📨 客服机器人<button class="gray sm" style="font-weight:400"
-        onclick="event.preventDefault();event.stopPropagation();copyHelp(this)"
-        title="把这一节整段复制，直接发给对方">📋 复制</button></summary>
-      <div class="helpbody">
-        <b>它是干什么的</b>：客户私聊机器人 → 消息自动转发到<b>你自己的 Telegram</b> → 你回复那条消息 → 自动发给客户。<br><br>
-        <b>怎么开始用</b><br>
-        1. 管理员把机器人分给你，给你一个<b>绑定码</b>（8 位）<br>
-        2. 你在 Telegram 里给机器人发 <code>/admin 绑定码</code><br>
-        3. 机器人回「✅ 绑定成功」就好了<br><br>
-        <b>怎么回复客户</b><br>
-        • 客户发消息 → 你收到转发 → <b>长按那条消息 → 点「回复」</b> → 输入内容发送<br>
-        • ⚠️ 不点「回复」直接发，消息发不出去<br><br>
-        <b>常用指令</b><br>
-        <code>/list</code> 看最近联系过的客户　<code>/help</code> 看全部指令<br><br>
-        ⚠️ 手机上的 Telegram 要保持登录，别把这个机器人拉黑或删对话，否则收不到客户消息。
-      </div>
-    </details>
-
-    <details class="card" data-for="usdt">
-      <summary>💰 USDT 助手<button class="gray sm" style="font-weight:400"
-        onclick="event.preventDefault();event.stopPropagation();copyHelp(this)"
-        title="把这一节整段复制，直接发给对方">📋 复制</button></summary>
-      <div class="helpbody">
-        <b>它是干什么的</b>：查 TRX/USDT 余额、盯地址、看实时汇率。<br><br>
-        <b>怎么开始用</b>：绑定后机器人底部会自己长出菜单，直接点就行。<br><br>
-        <b>底部菜单</b><br>
-        📡 <b>地址监听</b> —— 往这个地址转 U，机器人自动推给你<br>
-        🔍 <b>查U交易</b> —— 查某个地址的余额和最近交易<br>
-        💱 <b>查U汇率</b> —— 欧易场外商家的实时挂单价<br>
-        🗂 <b>地址管理</b> —— 看/删自己加的监听地址<br>
-        👥 <b>操作人</b> —— 让别人也能用这个机器人<br><br>
-        <b>也可以直接发</b><br>
-        • 发一个 TRC20 地址 → 返回余额 + 最近交易<br>
-        • 发 <code>/watch 地址 备注</code> → 添加监听<br><br>
-        ⚠️ 只有 USDT 的<b>普通转账</b>会推送（授权之类的不推）；刚加监听时先建基线，不会把历史交易一股脑推一遍。
-      </div>
-    </details>
-
-    <details class="card" data-for="shop">
-      <summary>🛒 商城机器人（能量自助充值）<button class="gray sm" style="font-weight:400"
-        onclick="event.preventDefault();event.stopPropagation();copyHelp(this)"
-        title="把这一节整段复制，直接发给对方">📋 复制</button></summary>
-      <div class="helpbody">
-        <b>它是干什么的</b>：客户自己转 TRX 过来，系统自动把能量发给<b>转账的那个地址</b>。<br>
-        客户不用登记地址、不用下单，转了就发货 —— 也就不存在发错人的问题。<br><br>
-        <b>你的准备工作</b><br>
-        1. 点机器人那行的「⚙️ 配置」<br>
-        2. 填<b>收款地址</b>（你自己的收款地址）<br>
-        3. 填单价、每个单位发多少能量<br>
-        4. 填上游 API Key（没有自己的货源就用「自定义上游」，照你供货商的文档填）<br>
-        5. 点「测试连接」确认通了<br><br>
-        <b>客户怎么操作</b><br>
-        私聊机器人 → 点「⚡ 充能量」→ 按提示转 TRX → 自动到账<br><br>
-        <b>面板上能看什么</b><br>
-        📋 <b>订单</b> —— 每笔收款和发货状态<br>
-        • 发货失败的可以点「重发」<br>
-        • 拿不准的点「标记已处理」<br>
-        • 面板会提醒你上游余额够不够<br><br>
-        ⚠️⚠️ <b>客户必须从自己的钱包转！</b>从交易所直接转的话，能量会发到交易所地址上（白送）。
-      </div>
+        <b>管理员</b>：在「新增机器人」选择类型，填写客户 Token 和使用时长。验证成功后，将激活码发给客户。<br>
+        <b>客户</b>：私聊自己的机器人发送 <code>/admin 激活码</code>，收到绑定成功提示后开始使用。<br>
+        <b>记账机器人</b>：每个机器人拥有独立源码、配置和数据，默认使用最新功能；客户在 Telegram「配置中心」管理自己的机器人。<br>
+        <div class="row" style="margin:10px 0 4px">
+          <button onclick="copyTut(TUT)">📋 复制客户教程</button>
+          <button class="gray" onclick="copyTut(TUT_MAKE)">📋 复制创建步骤</button>
+        </div>
+        <pre class="tut" id="tut"></pre></div>
     </details>
 
     <details class="card" data-for="ledger">
       <summary>📒 记账机器人<button class="gray sm" style="font-weight:400"
         onclick="event.preventDefault();event.stopPropagation();copyHelp(this)"
-        title="把这一节整段复制，直接发给对方">📋 复制</button></summary>
+        title="复制这节说明">📋 复制</button></summary>
       <div class="helpbody">
-        <b>它是干什么的</b>：群里记账。谁付了多少、日切对账。<br><br>
-        <b>⚠️ 第一步 · 必须关掉 Group Privacy</b>（不关的话群里发 <code>+100</code> 机器人根本收不到）：<br>
-        　　<b>@BotFather → /mybots → 选机器人 → Bot Settings → Group Privacy → Turn off</b><br>
-        　　<b>关完必须把机器人踢出群、再重新拉一次</b>，否则设置不生效。<br><br>
-        <b>拉进群之后</b>：群里发一条消息让它认识这个群，建议给它「删除消息」权限（清理消息要用）。<br><br>
-        <b>群里怎么记账</b><br>
-        <code>+100</code> 入款　<code>+100 张三</code> 带人名　<code>-50</code> 减分<br>
-        回复某人的消息再发 <code>+100</code> → 记到那个人头上<br><br>
-        <b>看账</b>：<code>账单</code>　<code>昨日账单</code>　<code>完整账单</code>　<code>撤销</code>　<code>清空</code><br><br>
-        <b>设置</b>：<code>汇率 7.2</code>　<code>设置费率 10</code>　<code>日切 3</code>　<code>查看费率</code><br><br>
-        <b>群里管理</b>：<code>通知所有人 内容</code>　<code>群成员</code>　<code>/del</code>（清理消息）<br><br>
-        <b>给群里的人开权限</b>：回复某人的消息发 <code>添加权限</code>／<code>删除权限</code>，发 <code>操作员</code> 看列表<br><br>
-        📄 完整版可以转发给群主：项目里的 <code>记账机器人_客户使用说明.txt</code>
-      </div>
+        <b>进群准备</b>：@BotFather → /mybots → 选择机器人 → Bot Settings → Group Privacy → Turn off；已有群需移出后重新加入机器人。<br>
+        <b>记账</b>：<code>+100</code> 入款、<code>-50</code> 冲减入款。只有开头为 + 或 -、后面跟数字金额的消息才记入款；<code>13-17的</code>、<code>张三+100</code> 不记账。<br>
+        <b>单笔参数</b>：<code>+1000/7.3</code> 指定汇率；<code>+1000*0.12</code> 本笔费率12%；<code>+1000u</code> 入款1000U，不扣入款费率。参数仅影响本笔。<br>
+        <b>下发</b>：<code>下发100</code> 记100U，<code>下发-100</code> 冲回；开启纯U模式后使用 <code>分红100</code>。<br>
+        <b>查账</b>：<code>账单</code>、<code>昨日账单</code>、<code>完整账单</code>、<code>显示日切</code>。回复原记账消息发送 <code>撤销</code>；<code>清空</code> 需管理权限。<br>
+        <b>配置</b>：私聊「配置中心」。基础配置用于新群，现有群在「群组」修改；个人参数优先于群默认，仅影响新流水。拥有者在「内部人员」授权。<br>
+        <b>完整说明</b>：私聊「📖 使用说明」，按九个分类查看命令；账单默认简洁模式，可在账单底部切换详细。</div>
     </details>
 
     <details class="card" data-for="admin">
-      <summary>📜 消息记录（把群消息存自己电脑上）<button class="gray sm" style="font-weight:400"
+      <summary>📜 消息记录<button class="gray sm" style="font-weight:400"
         onclick="event.preventDefault();event.stopPropagation();copyHelp(this)"
-        title="把这一节整段复制，直接发给对方">📋 复制</button></summary>
+        title="复制这节说明">📋 复制</button></summary>
       <div class="helpbody">
-        <b>它是干什么的</b>：把机器人看到的群消息<b>存在你自己电脑上</b>，面板里随时翻、随时搜。只有管理员能看。<br><br>
-        <b>要开吗</b>：<b>记账机器人默认就是开的</b>，不用做任何设置。<br>
-        不想记哪个群，就在群列表里点那个群的「关闭记录」。<br>
-        （保留时长固定 <b>48 小时</b>，到点自动删）<br><br>
-        <b>怎么用</b><br>
-        • 点机器人 → 看它有哪些群 → 点群 → 看消息<br>
-        • 右边有红数字=还没看过的条数<br>
-        • 点图放大（滚轮缩放、拖动平移）<br>
-        • 右键会话可以<b>置顶</b><br>
-        • 新消息会自己冒出来，不用刷新<br><br>
-        <b>支持哪些机器人</b>：<b>只支持记账机器人</b>。<br>
-        （其它类型（客服 / USDT / 商城）在群里压根收不到普通消息，
-        所以没有这个功能）<br><br>
-        ⚠️ 记账机器人要收到群里的普通消息，还是得先关掉 Group Privacy（见上面）。<br>
-        ⚠️ 只有<b>开始记录之后</b>的消息才看得到，之前的翻不出来；超期自动删。<br>
-        🔒 数据只在你本机，不会发到任何服务器。
-      </div>
+        <b>查看</b>：选择记账机器人 → 会话 → 消息。支持搜索、图片预览及被回复消息引用；点击引用可定位原消息。<br>
+        <b>记录范围</b>：默认开启，仅保存机器人实际收到的消息，保留48小时；不追溯历史消息。会话可单独关闭记录。<br>
+        <b>提醒</b>：未读数量显示在会话旁，新消息自动更新。记录存储在运行面板的服务器。</div>
+    </details>
+
+    <details class="card" data-for="kefu">
+      <summary>📨 客服机器人<button class="gray sm" style="font-weight:400"
+        onclick="event.preventDefault();event.stopPropagation();copyHelp(this)"
+        title="复制这节说明">📋 复制</button></summary>
+      <div class="helpbody">
+        <b>使用</b>：激活后，客户私聊消息会转发给你。<b>回复这条转发消息</b>，内容会发送给对应客户。<br>
+        <b>指令</b>：<code>/list</code> 最近客户；<code>/help</code> 全部指令。请保持 Telegram 正常登录，避免屏蔽机器人。</div>
+    </details>
+
+    <details class="card" data-for="usdt">
+      <summary>💰 USDT 助手<button class="gray sm" style="font-weight:400"
+        onclick="event.preventDefault();event.stopPropagation();copyHelp(this)"
+        title="复制这节说明">📋 复制</button></summary>
+      <div class="helpbody">
+        <b>查询</b>：发送完整 TRC20 地址，查询余额与近期转账；「查U汇率」查看实时报价。<br>
+        <b>监听</b>：<code>/watch 地址 备注</code> 添加监听，在「地址管理」查看或删除。<br>
+        <b>范围</b>：监听符合条件的普通转账；新增监听先建立基线，历史交易不会推送。</div>
+    </details>
+
+    <details class="card" data-for="shop">
+      <summary>🛒 商城机器人<button class="gray sm" style="font-weight:400"
+        onclick="event.preventDefault();event.stopPropagation();copyHelp(this)"
+        title="复制这节说明">📋 复制</button></summary>
+      <div class="helpbody">
+        <b>配置</b>：机器人列表 → 配置，填写收款地址、单价、每单位能量及上游 API Key，再测试连接。<br>
+        <b>购买</b>：客户私聊「⚡ 充能量」，按说明从自己的钱包转TRX；能量发到付款地址。请勿直接从交易所付款。<br>
+        <b>订单</b>：查看收款与发货状态；失败订单可重发。重发前确认上游未发货，避免重复处理。</div>
     </details>
 
     <details class="card" data-for="admin">
       <summary>❓ 常见问题<button class="gray sm" style="font-weight:400"
         onclick="event.preventDefault();event.stopPropagation();copyHelp(this)"
-        title="把这一节整段复制，直接发给对方">📋 复制</button></summary>
+        title="复制这节说明">📋 复制</button></summary>
       <div class="helpbody">
-        <b>群里发 +100 机器人没反应？</b><br>
-        99% 是 Group Privacy 没关，或者关了没把机器人踢出去重拉。回去看「记账机器人」那节。<br><br>
-        <b>机器人不回消息？</b><br>
-        ① 检查机器人是不是被停用了（面板上能看状态）<br>
-        ② 检查是不是到期了 —— 续期就恢复<br>
-        ③ 重启一下（停用再启用）<br><br>
-        <b>消息记录里没有我要的机器人？</b><br>
-        <b>只有记账机器人</b>有这个功能，而且是<b>默认就开的</b>，
-        不用手动开。其它类型（客服 / USDT / 商城）在群里收不到普通消息，
-        所以没有这个功能。<br><br>
-        <b>消息记录里图一直转圈？</b><br>
-        图是后台慢慢下的（一条一条来），等一会儿会自己出来。还是不出来的话看看运行日志。<br><br>
-        <b>Token 填错了 / 想换一个机器人？</b><br>
-        点那行的「🔑 Token」改。<br><br>
-        <b>机器人到期了怎么办？</b><br>
-        点「续期」（商户要联系管理员）。
-      </div>
+        <b>群内记账无响应</b>：检查群授权、记账开关及 Group Privacy；隐私关闭后，已有群需重新加入机器人。<br>
+        <b>机器人无响应</b>：检查启用状态、到期时间和运行日志，再使用「重启」。<br>
+        <b>消息记录缺失</b>：仅记账机器人提供记录；检查会话开关、隐私设置和48小时保留期限。<br>
+        <b>更换Token或续期</b>：在机器人列表使用「Token」或「续期」。商户续期请联系管理员。</div>
     </details>
   </div>
 </div>
@@ -856,6 +848,8 @@ function apiHeaders(){
 
 function api(path, opts){
   opts = opts || {};
+  opts.cache = 'no-store';
+  if(!opts.signal && typeof AbortSignal !== 'undefined') opts.signal = AbortSignal.timeout(15000);
   opts.headers = Object.assign(apiHeaders(), opts.headers||{});
   return fetch(path, opts).then(function(r){
     if(r.status===401){
@@ -1011,6 +1005,8 @@ if(isStandalone()){
 }
 
 function logout(msg){
+  msgStopLive(); MSG.VERSION++;
+  clearInterval(window._poll);window._poll = null;
   _setLS('pw', ''); _setLS('token', '');
   PW = ''; TOK = '';
   clearHTMLCache();       // ★ 别把上一个人的页面缓存留给下一个人
@@ -1152,7 +1148,9 @@ function renderTable(bots, target, statLabel, extra){
       : '<span style="color:#d29922">⏳ 等待绑定</span>';
     h+='<tr>'
       +'<td><b>'+esc(b.note)+'</b><div class="muted">'+esc(b.created)+'</div></td>'
-      +'<td>@'+esc(b.username)+'<div class="muted">'+esc(b.name)+'</div></td>'
+      +'<td>@'+esc(b.username)+'<div class="muted">'+esc(b.name)+'</div>'
+      +((b.instance_folder||b.node_folder)?'<div class="muted">独立实例：'+esc(b.instance_folder||b.node_folder)+'</div>':'')
+      +'<div class="muted">'+esc(b.remote?'客户自建':b.server_name||'本机服务器')+'</div></td>'
       +'<td><span class="code" onclick="copyCode(\''+jsq(b.bind_code)+'\')" title="点击复制">'+esc(b.bind_code)+'</span></td>'
       +'<td>'+bound+'</td>'
       +'<td>'+statusTag(b)+(b.error?'<div class="muted" style="max-width:180px;word-break:break-all">'+esc(b.error)+'</div>':'')+'</td>'
@@ -1169,25 +1167,19 @@ function renderTable(bots, target, statLabel, extra){
                 ? '<button class="sm" onclick="openExt(\''+b.id+'\',\''+jsq(b.note)+'\')">续期恢复</button> '
                 : '<button class="gray sm" onclick="openExt(\''+b.id+'\',\''+jsq(b.note)+'\')">续期</button> ')
               +(extra ? extra(b) : '')
-              // ★ 只有「客户自建」的才多这一个按钮 —— **一键下载填好的安装包**
-              //   （里面有编号、token、回传地址），下载完直接发给客户，
-              //   客户解压就能跑。全程不用粘任何东西。
-              +(b.remote
+              +(b.type === 'ledger'&&!b.node_id
                 ? '<button class="gray sm" onclick="soloZip(\''+b.id+'\',\''
-                  + jsq(b.note) + '\')"'
-                  +' title="下载填好的客户安装包（解压就能跑，不用填配置）">'
+                  + jsq(b.note) + '\')" title="仅下载安装包，不改变运行位置和权限">'
                   +'⬇️ 安装包</button> '
-                // ★ 补票按钮：添加时忘了勾「跑在客户自己的服务器上」才会出现，
-                //   点一下就补上、这按钮自己也消失（不会一直占地方）
-                : (b.type === 'ledger'
-                   ? '<button class="gray sm" onclick="setRemote(\''+b.id+'\',\''
-                     + jsq(b.note) + '\')"'
-                     +' title="这个机器人跑在客户自己的服务器上？点一下改过来'
-                     +'（本面板不再运行它，并多出一个安装包下载）">'
-                     +'☁ 客户自建</button> '
-                   : ''))
+                  +'<button class="gray sm" onclick="setRemote(\''+b.id+'\',\''
+                  + jsq(b.note) + '\',' + (!b.remote) + ')"'
+                  +' title="切换机器人实际运行的服务器">'
+                  +(b.remote ? '恢复服务器运行' : '切换客户自建')+'</button> '
+                : '')
               +'<button class="gray sm" onclick="editNote(\''+jsq(b.id)+'\')"'
               +' title="改这个机器人的备注名（列表第一列）">备注</button> '
+              +((b.instance_folder||b.node_id)&&!b.remote&&b.enabled?'<button class="gray sm" onclick="act(\''+jsq(b.id)+'\',\'restart\')" title="只重启这个机器人，加载它自己的源码">重启实例</button> ':'')
+              +(b.node_pending?'<button class="sm" onclick="act(\''+jsq(b.id)+'\',\'retrydeploy\')">重试部署</button> ':'')
               +'<button class="red sm" onclick="delBot(\''+b.id+'\',\''+jsq(b.note)+'\')">删除</button>')
             // 商户：只能配自己的、看订单、换自己的 token
             : ((extra ? extra(b) : '')
@@ -1407,8 +1399,9 @@ function openLed(id, note){
     h += '<div class="muted" style="margin:12px 0 0 0;padding:10px;background:#0d1117;border-radius:8px;line-height:1.7">'
        + '<b>群里怎么用</b>（这些是<b>在群里发命令</b>设的，不在这儿配）：<br>'
        + '<code>开启</code> / <code>关闭记账</code> · 记账总开关<br>'
-       + '<code>汇率 7.2</code> · <code>设置费率 10</code> · <code>日切3</code> · <code>查看费率</code><br>'
-       + '<code>添加操作员</code>（回复某人的消息）· <code>操作员</code> 看列表<br>'
+       + '<code>设置汇率 7.2</code> · <code>设置费率 10</code> · <code>设置日切时间3</code> · <code>关闭日切</code> · <code>查看费率</code><br>'
+       + '<code>添加操作人 @aaa @bbb</code> / <code>删除操作人 @aaa @bbb</code>（也可回复人员消息）· <code>显示操作人</code> 看列表<br>'
+       + '记账仅限拥有者、内部授权操作人员和本群操作人；拉入机器人不自动授权。<br>'
        + '<code>通知所有人 内容</code> · <code>/del</code> 清理消息 · <code>群成员</code><br>'
        + '私聊机器人：<code>广播</code> 给多个群发通知 · <code>/del</code> 批量清理</div>';
     document.getElementById('ledBody').innerHTML = h;
@@ -1616,6 +1609,7 @@ function doExtend(dur, label){
 }
 
 function refresh(){
+  if(ME.role==='admin')loadNodes(false).catch(function(){});
   api('/api/bots').then(function(d){
     if(!d || !d.ok) return;
     applyRole(d.me);
@@ -1849,19 +1843,20 @@ function addBot(){
   var remote=!!(document.getElementById('remote') || {}).checked;
   if(!token){ toast('请填写 token'); return; }
   toast('正在验证 token…');
-  api('/api/bots', {method:'POST', body:JSON.stringify(
-      {note:note, token:token, type:type, duration:duration, remote:remote})})
+  api('/api/bots', {method:'POST',signal:AbortSignal.timeout(40000), body:JSON.stringify(
+      {note:note, token:token, type:type, duration:duration, remote:remote,node_id:remote?'':document.getElementById('addNode').value})})
     .then(function(d){
       if(d.ok){
         document.getElementById('note').value='';
         document.getElementById('token').value='';
         if(document.getElementById('remote'))
           document.getElementById('remote').checked=false;
-        toast(remote ? '添加成功（客户自建，本面板不运行它）'
+        document.getElementById('addNode').disabled=false;
+        toast(d.bot&&d.bot.node_pending?'部署待确认，请在机器人列表重试部署':remote ? '添加成功（客户自建，本面板不运行它）'
                      : '添加成功，绑定码已生成');
         refresh();
       } else toast('失败：'+d.error);
-    }).catch(function(){});
+    }).catch(function(){toast('创建结果未确认，请刷新机器人列表核对');refresh();});
 }
 
 /* 通用的「对机器人做个动作」。
@@ -1870,14 +1865,14 @@ function addBot(){
    函数和接口都留着 —— 想加回来，把按钮加回 renderTable 的操作列就行。 */
 function act(id, action){
   if(action==='newcode' && !confirm('换绑定码会解除当前使用者的绑定，确定吗？')) return;
-  api('/api/bots/'+id+'/'+action, {method:'POST'})
-    .then(function(){ toast('已处理'); refresh(); }).catch(function(){});
+  api('/api/bots/'+id+'/'+action, {method:'POST',signal:AbortSignal.timeout(35000)})
+    .then(function(d){ if(!d.ok){toast(d.error||'操作失败');return;} toast('已处理'); refresh(); }).catch(function(){});
 }
 
 function delBot(id, note){
-  if(!confirm('确定删除「'+note+'」吗？删除后该机器人立即停止，数据一并清除。')) return;
+  if(!confirm('确定删除「'+note+'」吗？删除后该机器人立即停止，独立源码文件夹、配置和数据一并清除。')) return;
   api('/api/bots/'+id+'/delete', {method:'POST'})
-    .then(function(){ toast('已删除'); refresh(); }).catch(function(){});
+    .then(function(d){ if(!d.ok){toast(d.error||'删除失败');return;} toast('已删除'); refresh(); }).catch(function(){});
 }
 
 /* ★★ 复制到剪贴板 —— **不能**直接调 navigator.clipboard.writeText
@@ -1972,69 +1967,23 @@ document.getElementById('type').addEventListener('change', function(){
     h.textContent='USDT 助手：绑定后可以查 TRC20 地址交易、监听地址进出账';
   } else if(t==='shop'){
     h.textContent='商城机器人：面向公众的自助服务，添加后记得点「⚙️ 配置」填收款地址';
+  } else if(t==='ledger'){
+    h.textContent='验证 Token 后按机器人用户名建立独立实例并生成激活码；客户激活后拥有完整功能和自己的配置中心';
   } else {
     h.textContent='添加后系统会自动验证 token，并生成一个绑定码';
   }
 });
 
 /* ============ 新手教程（可复制发给朋友） ============ */
-var TUT_MAKE = `【怎么创建 Telegram 机器人并拿到 token】
+var TUT_MAKE = `【创建机器人】
+1. 在 Telegram 打开官方 @BotFather，发送 /newbot。
+2. 按提示填写显示名称，以及以 bot 结尾的英文用户名。
+3. 复制生成的 Token，私聊发给管理员添加。`;
 
-第 1 步　找到 @BotFather
-打开 Telegram，在最上面的搜索框输入：@BotFather
-认准带蓝色认证勾的那个（名字就叫 BotFather，头像是个机器人图标）
-点进去，点底部的「START / 开始」
-
-第 2 步　发送创建指令
-在对话框里发送这一条：/newbot
-
-第 3 步　给机器人起个名字
-它会问你：Alright, a new bot. How are we going to call it?
-（意思是：给机器人起个名字）
-你随便起一个，比如：客服助手
-中文也行，这个名字是给别人看的
-
-第 4 步　给机器人起个用户名
-它接着问：Good. Now let's choose a username for your bot.
-（意思是：给机器人起一个用户名）
-要输入一个以 bot 结尾的英文，比如：mykefu2026_bot
-如果提示已被占用，换一个再试
-
-第 5 步　复制 token 发给我
-创建成功后它会给你一大段文字，里面有一行：
-
-    Use this token to access the HTTP API:
-    1234567890:AAHxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-
-下面那串「数字:字母」就是 token。
-长按它 → 复制 → 发给我就行了。
-
-⚠️ token 相当于这个机器人的钥匙，只发给我一个人，不要发到群里或告诉别人。
-`;
-
-var TUT_BIND = `
-【拿到绑定码之后怎么用】
-
-我会发给你一条这样的消息：
-
-    /admin XXXXXXXXX
-
-你这样操作：
-1. 在 Telegram 里打开你刚建好的那个机器人
-2. 把 /admin XXXXXXXXX 原样发过去（注意前面有个斜杠 /）
-3. 机器人回复「✅ 绑定成功」，就完成了
-
-绑定之后（客服机器人）：
-• 客户给机器人发消息 → 会自动转发到你的 Telegram
-• 你要回复 → 长按那条客户消息 → 点「回复」→ 输入内容发送
-  （不点「回复」直接发的话，消息发不出去）
-• 常用指令：
-    /list    查看最近联系过的客户
-    /help    查看全部指令
-
-⚠️ 想一直能收到客户消息，手机上的 Telegram 要保持登录，
-   也不要把这个机器人拉黑或删掉对话。
-`;
+var TUT_BIND = `【激活与配置】
+1. 管理员添加后会给你激活码。
+2. 打开自己的机器人，发送 /admin 激活码。
+3. 绑定成功后，打开「配置中心」修改设置；私聊「使用说明」查看功能。`;
 
 var TUT = TUT_MAKE + '\n' + TUT_BIND;
 document.getElementById('tut').textContent = TUT;
@@ -2052,11 +2001,110 @@ document.addEventListener('click', function(e){
 /* ==================================================================
    顶部标签切换
    ================================================================== */
-var TABS = ['msg', 'bots', 'add', 'merch', 'help', 'logs'];
+var TABS = ['msg', 'bots', 'add', 'merch', 'help', 'logs', 'appearance', 'server'];
 var CUR_TAB = 'msg';
 
+var SERVER_BUSY=false,NODE_STATE=null,NODE_LOADING=null,NODE_UPDATED=0,NODE_LOCAL=null;
+function nodeDate(value){return value?new Date(value*1000+28800000).toISOString().slice(0,16):'';}
+function nodeTime(value){return value?Math.floor(new Date(value+':00+08:00').getTime()/1000):0;}
+function nodeEntry(id){return id?NODE_STATE.nodes.find(function(n){return n.id===id;}):Object.assign({id:''},NODE_STATE.local);}
+function nodeList(){return [Object.assign({id:'',online:true},NODE_STATE.local)].concat(NODE_STATE.nodes);}
+async function loadNodes(force){
+ if(ME.role!=='admin')return;
+ if(NODE_LOADING)return NODE_LOADING;
+ if(!force&&NODE_STATE&&Date.now()-NODE_UPDATED<30000)return;
+ NODE_LOADING=(async function(){
+  var d=await api('/api/nodes');if(!d.ok)throw Error(d.error||'读取服务器失败');
+  var first=!NODE_STATE;NODE_STATE=d;NODE_UPDATED=Date.now();
+  var items=nodeList(),options=items.map(function(n){return '<option value="'+esc(n.id)+'">'+esc(n.name)+(n.id===d.default?' · 新增默认':'')+'</option>';}).join('');
+  var select=document.getElementById('addNode'),value=select.value;select.innerHTML=options;select.value=!first&&items.some(function(n){return n.id===value;})?value:d.default;
+  var alerts=items.filter(function(n){return n.renewal_status;});
+  var soon=items.filter(function(n){return n.renewal_soon;}),badge=document.getElementById('serverRenewBadge');
+  badge.hidden=!soon.length;badge.title=soon.length+' 台服务器将在 3 天内到期或已到期';badge.setAttribute('aria-label',badge.title);
+  document.getElementById('renewalAlerts').textContent=alerts.map(function(n){return n.name+'：'+(n.renewal_status==='overdue'?'已到期，请核对续费':'即将到期，请及时续费');}).join('；');
+  var opened=Array.from(document.querySelectorAll('#nodeList details[open]')).map(function(el){return el.id;});
+  document.getElementById('nodeList').innerHTML=items.map(function(n){var id=jsq(n.id),offline=n.id&&(!n.online||Date.now()/1000-n.updated_at>45);return '<div class="node-item" data-node="'+esc(n.id)+'"><b>'+esc(n.name)+'</b> <span class="tag '+(offline?'err':'ok')+'">'+(n.id?(offline?'连接中断':'在线'):'主服务器')+'</span>'+(n.id===d.default?' <span class="tag wait">新增默认</span>':'')+'<p class="muted">'+esc(n.id?n.url:'当前面板所在服务器')+'</p><p class="node-date '+(n.renewal_status?'node-warn':'muted')+'">'+(n.renew_at?'到期 '+nodeDate(n.renew_at).replace('T',' ')+' · 北京时间':'未设置到期时间')+'</p>'+(n.remind_at?'<p class="muted node-date">提醒 '+nodeDate(n.remind_at).replace('T',' ')+'</p>':'')+'<div class="row"><button class="gray sm" onclick="editNodeSettings(\''+id+'\')">名称与续费</button>'+(n.id!==d.default?'<button class="gray sm" onclick="nodeAction(\''+id+'\',\'default\')">设为新增默认</button>':'')+(n.id?'<button class="gray sm" onclick="editNodeConnection(\''+id+'\')">连接设置</button><button class="gray sm" onclick="nodeAction(\''+id+'\',\'check\')">检查连接</button><button class="red sm" onclick="nodeAction(\''+id+'\',\'remove\')">移除连接</button>':'')+'</div><div class="node-monitor" id="nodeMonitor_'+(n.id||'local')+'">'+nodeMonitor(n,n.id?n.server:NODE_LOCAL)+'</div></div>';}).join('');
+  opened.forEach(function(id){var el=document.getElementById(id);if(el)el.open=true;});
+ })();
+ try{await NODE_LOADING;}finally{NODE_LOADING=null;}
+}
+function editNodeSettings(id){
+ var n=nodeEntry(id);if(!n)return;
+ document.getElementById('nodeSettingsId').value=id;document.getElementById('nodeSettingsName').value=n.name;
+ document.getElementById('nodeRenewAt').value=nodeDate(n.renew_at);document.getElementById('nodeRemindAt').value=nodeDate(n.remind_at);
+ document.getElementById('nodeSettingsStatus').textContent='';document.getElementById('nodeSettingsForm').hidden=false;document.getElementById('nodeConnectionForm').hidden=true;
+ document.getElementById('nodeSettingsName').focus();
+}
+async function saveNodeSettings(event){
+ event.preventDefault();var button=document.getElementById('nodeSettingsSave');if(button.disabled)return;button.disabled=true;
+ try{var result=await api('/api/nodes/settings',{method:'POST',body:JSON.stringify({id:document.getElementById('nodeSettingsId').value,name:document.getElementById('nodeSettingsName').value,renew_at:nodeTime(document.getElementById('nodeRenewAt').value),remind_at:nodeTime(document.getElementById('nodeRemindAt').value)})});if(!result.ok)throw Error(result.error);document.getElementById('nodeSettingsForm').hidden=true;await loadNodes(true);refresh();toast('名称与续费提醒已保存');}
+ catch(e){document.getElementById('nodeSettingsStatus').textContent=e.message||'保存失败';}finally{button.disabled=false;}
+}
+function editNodeConnection(id){
+ var n=id?nodeEntry(id):{};document.getElementById('nodeConnectionId').value=id;
+ document.getElementById('nodeConnectionTitle').textContent=id?'连接设置':'添加服务器';
+ document.getElementById('nodeName').value=n.name||'';document.getElementById('nodeUrl').value=n.url||'';
+ document.getElementById('nodeKey').value='';document.getElementById('nodeFingerprint').value=n.fingerprint||'';
+ document.getElementById('nodeConnectionStatus').textContent='';document.getElementById('nodeConnectionForm').hidden=false;document.getElementById('nodeSettingsForm').hidden=true;document.getElementById('nodeName').focus();
+}
+async function saveNodeConnection(event){
+ event.preventDefault();var button=document.getElementById('nodeConnectionSave');if(button.disabled)return;button.disabled=true;
+ document.getElementById('nodeConnectionStatus').textContent='正在验证连接…';
+ try{var result=await api('/api/nodes',{method:'POST',signal:AbortSignal.timeout(40000),body:JSON.stringify({id:document.getElementById('nodeConnectionId').value,name:document.getElementById('nodeName').value,url:document.getElementById('nodeUrl').value,key:document.getElementById('nodeKey').value,fingerprint:document.getElementById('nodeFingerprint').value})});if(!result.ok)throw Error(result.error);document.getElementById('nodeKey').value='';document.getElementById('nodeConnectionForm').hidden=true;await loadNodes(true);toast('服务器已连接');}
+ catch(e){document.getElementById('nodeConnectionStatus').textContent=e.message||'连接未确认，请刷新列表核对';}finally{button.disabled=false;}
+}
+async function nodeAction(id,action){
+ if(action==='remove'&&!confirm('移除此服务器连接？有机器人登记时不能移除。'))return;
+ try{var d=await api('/api/nodes/'+(action==='default'?'default':id+'/'+action),{method:'POST',body:JSON.stringify({id:id})});if(!d.ok)throw Error(d.error);await loadNodes(true);if(action==='default')document.getElementById('addNode').value=id;toast(action==='check'?(d.result.online?'连接正常':d.result.error):'已保存');}
+ catch(e){toast(e.message||'操作未确认，请刷新核对');}
+}
+async function downloadNode(){
+ try{var response=await fetch('/api/nodes/package',{headers:apiHeaders()});if(!response.ok)throw Error('下载失败');var url=URL.createObjectURL(await response.blob()),link=document.createElement('a');link.href=url;link.download='tgpanel-node.tar.gz';document.body.appendChild(link);link.click();link.remove();setTimeout(function(){URL.revokeObjectURL(url);},10000);}catch(e){toast(e.message||'下载失败');}
+}
+function serverBytes(n){if(n==null)return '—';return n>=1073741824?(n/1073741824).toFixed(1)+' GiB':n>=1048576?(n/1048576).toFixed(1)+' MiB':n>=1024?(n/1024).toFixed(1)+' KiB':Math.round(n)+' B';}
+function serverPercent(n){return n==null?'采样中':n.toFixed(1)+'%';}
+function serverMetric(title,value,detail,percent){return '<div class="server-metric"><span class="muted">'+title+'</span><div class="server-value">'+value+'</div><div class="muted">'+detail+'</div>'+(percent==null?'':'<progress max="100" value="'+percent+'" aria-label="'+title+'使用率"></progress>')+'</div>';}
+function nodeMonitor(n,s){
+ if(n.id&&(!n.online||Date.now()/1000-n.updated_at>45))return '<p class="node-warn">服务器连接中断，实际运行状态待确认</p>';
+ if(!s||!s.ready)return '<p class="muted">'+esc(s&&s.reason||'正在采样')+'</p>';
+ var stale=s.stale||Date.now()/1000-s.updated_at>45,c=s.capacity,limit={cpu:'CPU',memory:'内存',disk:'磁盘'};
+ var metrics=serverMetric('CPU',serverPercent(s.cpu_percent),s.cores+' 核',s.cpu_percent)+serverMetric('内存',serverPercent(s.memory.percent),'可用 '+serverBytes(s.memory.available),s.memory.percent)+serverMetric('磁盘',serverPercent(s.disk.percent),'可用 '+serverBytes(s.disk.free),s.disk.percent)+serverMetric('运行实例',String(s.local_running),(s.updates_per_minute==null?'—':s.updates_per_minute)+' 条/分钟',null);
+ var capacity=stale?'数据已过期，等待刷新':c.additional==null?'等待完整采样':'约 '+c.additional+' 个';
+ var budget=c.additional==null?(c.reason||'等待采样'):'单实例预算 '+serverBytes(c.memory_per_bot)+'、'+c.cpu_cores_per_bot+' 核；预留内存 '+serverBytes(c.memory_reserve)+'、CPU 30%、磁盘至少 10%。采样 '+Math.floor(c.sample_seconds/60)+' 分钟，收到 '+c.received_updates+' 条更新。';
+ var h=s.history||[],chart='<path d="M0 125H800 M0 65H800 M0 5H800" stroke="#26303f" fill="none"/>'+['cpu','memory'].map(function(key,i){return '<polyline points="'+h.map(function(v,j){return (h.length>1?j/(h.length-1)*800:0)+','+(125-Math.min(100,v[key])*1.2);}).join(' ')+'" fill="none" stroke="'+(i?'#3fb950':'#58a6ff')+'" stroke-width="2" vector-effect="non-scaling-stroke"/>';}).join('');
+ return '<p class="muted">更新 '+new Date(s.updated_at*1000).toLocaleTimeString()+' · 每 '+s.interval+' 秒采样'+(stale?' · 数据过期':'')+'</p>'+(s.alerts.length?'<p class="node-warn">'+esc(s.alerts.join('；'))+'</p>':'')+'<div class="server-grid">'+metrics+'</div><div class="node-capacity"><span class="muted">预计可新增记账机器人</span><div class="server-value">'+capacity+'</div><p class="muted">'+esc(c.confidence||'')+(c.limiting?' · 当前约束：'+limit[c.limiting]:'')+'</p></div><details id="nodeDetail_'+(n.id||'local')+'"><summary>趋势与估算明细</summary><svg class="server-chart" viewBox="0 0 800 130" preserveAspectRatio="none" role="img" aria-label="最近30分钟CPU与内存趋势">'+chart+'</svg><p class="muted">最近 30 分钟 · 蓝色 CPU · 绿色内存</p><p class="muted">'+esc(budget)+'</p><p class="muted">按当前业务估算，预留系统余量，不代表压测上限。</p><p class="muted">运行 '+Math.floor(s.uptime/86400)+' 天 · ↓ '+serverBytes(s.network.rx_per_second)+'/s · ↑ '+serverBytes(s.network.tx_per_second)+'/s</p><p class="muted">消息文字 '+serverBytes(s.storage.archive)+' · 图片 '+serverBytes(s.storage.media)+' · 账本等 '+serverBytes(s.storage.other)+'（每 5 分钟统计）</p><p class="muted">消息保留 48 小时，账本持续保存，在用广告和欢迎图片保留。</p></details>';
+}
+async function loadServer(force){
+ if(ME.role!=='admin'||CUR_TAB!=='server'||SERVER_BUSY||(!force&&document.hidden))return;
+ SERVER_BUSY=true;
+ try{
+  await loadNodes(true);
+  var response=await api('/api/server'),local=response.server;
+  if(!response.ok||!local)throw Error(response.error||'读取失败');
+  NODE_LOCAL=local;
+  nodeList().forEach(function(n){var block=document.getElementById('nodeMonitor_'+(n.id||'local')),opened=block.querySelector('details[open]');block.innerHTML=nodeMonitor(n,n.id?n.server:local);if(opened&&block.querySelector('details'))block.querySelector('details').open=true;});
+  var workers=[];if(local.workers)local.workers.forEach(function(w){workers.push(Object.assign({},w,{server_name:NODE_STATE.local.name}));});
+  NODE_STATE.nodes.forEach(function(node){var stale=!node.online||Date.now()/1000-node.updated_at>45;(node.server&&node.server.workers||[]).forEach(function(w){workers.push(Object.assign({},w,{server_name:node.name,stale:stale}));});});
+  LAST_ALL.forEach(function(bot){if(!workers.some(function(w){return w.username===bot.username;})){var entry=bot.node_id?nodeEntry(bot.node_id):NODE_STATE.local;workers.push({username:bot.username,server_name:bot.remote?'客户自建':entry&&entry.name||bot.server_name,stale:true});}});
+  document.getElementById('serverWorkers').innerHTML='<table><thead><tr><th>机器人</th><th>服务器</th><th>内存</th><th>CPU</th><th>更新/分钟</th></tr></thead><tbody>'+workers.map(function(w){return '<tr><td>@'+esc(w.username)+'</td><td>'+esc(w.server_name)+(w.stale?' · 待确认':'')+'</td><td>'+serverBytes(w.stale?null:w.rss)+'</td><td>'+(w.stale||w.cpu==null?'—':(w.cpu*100).toFixed(1)+'%')+'</td><td>'+(w.stale||w.updates_per_minute==null?'—':w.updates_per_minute)+'</td></tr>';}).join('')+'</tbody></table><p class="muted">各服务器实例 · CPU 以单核 100% 计，资源按实际所在服务器统计。</p>';
+
+  document.getElementById('serverStatus').textContent='';
+ }catch(error){document.getElementById('serverStatus').textContent='读取失败，请重试；上次显示的数据可能已过期';}
+ finally{SERVER_BUSY=false;}
+}
+
+async function loadAppearance(){
+ var status=document.getElementById('appearanceStatus');status.textContent='正在读取…';
+ try{var result=await api('/api/appearance');if(!result.ok)throw Error(result.error||'读取失败');document.getElementById('footerText').value=result.footer_text;status.textContent='保存后，小程序刷新即可看到。'}catch(e){status.textContent=e.message||'读取失败，请重试';}
+}
+async function saveAppearance(event){
+ event.preventDefault();var button=document.getElementById('appearanceSave');if(button.disabled)return;button.disabled=true;button.textContent='保存中…';
+ var status=document.getElementById('appearanceStatus');
+ try{var result=await api('/api/appearance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({footer_text:document.getElementById('footerText').value})});if(!result.ok)throw Error(result.error||'保存失败');document.getElementById('footerText').value=result.footer_text;status.textContent='已保存，全局生效。';toast('底部显示已保存');}catch(e){status.textContent=e.message||'保存失败，请重试';}finally{button.disabled=false;button.textContent='保存';}
+}
 function switchTab(name, skipSave){
   if(TABS.indexOf(name) < 0) name = 'msg';
+  if(CUR_TAB !== name) MSG.VERSION++;
   CUR_TAB = name;
   TABS.forEach(function(t){
     var pane = document.getElementById('pane-' + t);
@@ -2071,14 +2119,18 @@ function switchTab(name, skipSave){
   //   这里再兜一道 —— 万一从 localStorage 里读回 'msg' 也不会漏进来。
   if(ME.role !== 'admin'
      && (name === 'msg' || name === 'add' || name === 'merch'
-         || name === 'logs')){
+         || name === 'logs' || name === 'appearance' || name === 'server')){
     switchTab('bots', true); return;
   }
   if(!skipSave) { try{ localStorage.setItem('panel_tab', name); }catch(e){} }
-  if(name === 'msg') msgLoadBots();
+  if(name === 'msg') msgGoto(MSG.LEVEL);
   if(name === 'bots') renderTypeTabs();
+  if(name === 'add')loadNodes(true).catch(function(e){toast(e.message||'读取服务器失败');});
   if(name === 'merch') loadMerch && loadMerch();
   if(name === 'logs') loadLogins();
+  if(name === 'appearance') loadAppearance();
+  if(window._serverPoll){clearInterval(window._serverPoll);window._serverPoll=null;}
+  if(name === 'server'){var tab=document.querySelector('[data-pane=server]');document.getElementById('tabs').scrollLeft=Math.max(0,tab.offsetLeft-tab.parentElement.offsetLeft);loadServer(true);window._serverPoll=setInterval(loadServer,10000);}
   // 离开消息页就把轮询停了（省资源）
   if(name !== 'msg') msgStopLive();
 }
@@ -2099,7 +2151,7 @@ function applyRoleTabs(){
   var btns = document.querySelectorAll('#tabs .tab');
   Array.prototype.forEach.call(btns, function(b){
     var p = b.getAttribute('data-pane');
-    if(p === 'add' || p === 'merch' || p === 'logs' || p === 'msg'){
+    if(p === 'add' || p === 'merch' || p === 'logs' || p === 'msg' || p === 'appearance' || p === 'server'){
       b.style.display = admin ? '' : 'none';
     }
   });
@@ -2436,8 +2488,8 @@ function showType(t){
 /* ==================================================================
    消息记录：机器人 → 群 → 群内消息
    ================================================================== */
-var MSG = {BOTS: [], BID: '', CHAT: '', CURSOR: '', SEEN: {}, UNREAD: {},
-           TIMER: null, BUSY: false, LEVEL: 1};
+var MSG = {BOTS: [], BID: '', CHAT: '', CURSOR: '', SEQ: 0, SEEN: {}, UNREAD: {},
+           TIMER: null, BUSY: false, LEVEL: 1, VERSION: 0, LOADING: false};
 var ARCHIVE_TYPES = ['ledger'];
 
 function seenKey(bid){ return 'panel_seen_' + bid; }
@@ -2506,20 +2558,25 @@ function msgLoadBots(silent){
   //   因为要每几秒刷一次，N 次请求太浪费
   var seen = {};
   all.forEach(function(b){ seen[b.id] = msgSeen(b.id); });
-  api('/api/archive/unread_all',
+  var version = MSG.VERSION;
+  MSG.LOADING = true;
+  return api('/api/archive/unread_all',
       {method: 'POST', body: JSON.stringify({seen: seen})})
     .then(function(d){
+      if(version !== MSG.VERSION || CUR_TAB !== 'msg') return;
       if(!d.ok) throw new Error(d.error || '读取失败');
       // 第一次打开这个机器人：把服务端给的基线存下来（历史记录不算未读）
       var base = d.base || {};
       Object.keys(base).forEach(function(bid){ msgSaveSeen(bid, base[bid]); });
       msgRenderBots(d.unread || {});
+      return true;
     }).catch(function(e){
-      if(!silent){
+      if(!silent && version === MSG.VERSION && CUR_TAB === 'msg'){
         setHTML('msgBots', '<div class="empty">'
           + esc(e.message || '读取失败') + '</div>');
       }
-    });
+      return false;
+    }).finally(function(){if(version === MSG.VERSION)MSG.LOADING = false;});
 }
 
 function msgRenderBots(res){
@@ -2612,18 +2669,22 @@ function editNote(id){
    ★ 为什么需要：那个勾选框只在**添加**时才有，忘了勾只能删掉重建，
      而重建会换一个机器人 id，**已经发给客户的安装包当场失效**。
    点完之后本面板就不再启动它了（改由客户的服务器跑）。 */
-function setRemote(id, note){
-  if(!confirm('把「' + note + '」改成「客户自建」？\n\n'
-      + '· 本面板**不再运行**它，改由客户自己的服务器跑\n'
-      + '· 操作列会多出一个「⬇️ 安装包」\n\n'
-      + '如果它现在正跑在本面板上，改完就停了。')) return;
+function setRemote(id, note, on){
+  var message = on
+    ? '把「' + note + '」切换到客户自己的服务器？\n\n'
+      + '当前服务器将停止运行机器人；客户服务器启动最新版后，小程序配置中心继续可用。\n'
+      + '仅下载安装包不需要切换；请确认准备在客户服务器上运行。'
+    : '恢复「' + note + '」在当前服务器运行？\n\n'
+      + '请先停止客户服务器上的同一个机器人，避免同时运行。\n'
+      + '恢复后，拥有者可以继续使用配置中心；权限和账单保留。';
+  if(!confirm(message)) return;
   api('/api/bots/' + id + '/remote',
-      {method:'POST', body: JSON.stringify({on: true})})
+      {method:'POST', body: JSON.stringify({on: on})})
     .then(function(d){
-      if(!d.ok){ toast(d.error || '改不了'); return; }
-      toast('改好了 —— 现在点「⬇️ 安装包」下载给客户');
+      if(!d.ok){ toast(d.error || '切换失败'); return; }
+      toast(on ? '已切换客户自建，当前服务器已停止运行' : '已恢复服务器运行，配置中心可用');
       refresh();
-    }).catch(function(){ toast('改不了'); });
+    }).catch(function(){ toast('切换失败'); });
 }
 
 /* ★★ 一键下载「客户安装包」—— 全自动的那一步
@@ -2653,7 +2714,7 @@ function soloZip(id, note){
       a.click();
       a.remove();
       setTimeout(function(){ URL.revokeObjectURL(url); }, 10000);
-      toast('下载好了 —— 直接发给客户，解压后跑 install.sh');
+      toast('已下载当前版本（含小程序配置）；启动客户服务器前请先切换运行位置');
     })
     .catch(function(e){ toast('打包失败：' + (e && e.message || e)); });
 }
@@ -2711,7 +2772,10 @@ function muteChat(bid, cid, mute){
 
 /* ---- 第 2 级：这个机器人有哪些群 ---- */
 function msgOpenBot(bid, silent){
+  if(MSG.BID !== bid || MSG.LEVEL !== 2){MSG.VERSION++;}
   MSG.BID = bid;
+  var version = MSG.VERSION;
+  MSG.LOADING = true;
   var b = MSG.BOTS.filter(function(x){ return x.id === bid; })[0]
        || (LAST_ALL || []).filter(function(x){ return x.id === bid; })[0] || {};
   msgGoto(2, true);      // ★ skipLoad：下面自己会加载，别让它回头再调一次自己
@@ -2719,7 +2783,8 @@ function msgOpenBot(bid, silent){
   // ★ 走 setHTML（见 loadLogins 上面的说明）：直写会让缓存和 DOM 对不上，
   //   于是「加载中…」卡住、真数据回来也不重画
   if(box && !silent) setHTML('msgChats', '<div class="empty">加载中…</div>');
-  api('/api/archive/' + bid + '/chats').then(function(d){
+  return api('/api/archive/' + bid + '/chats').then(function(d){
+    if(version !== MSG.VERSION || CUR_TAB !== 'msg') return;
     if(!d.ok) throw new Error(d.error || '读取失败');
     var chats = d.chats || [], st = d.stats || {};
     var c2 = document.getElementById('cnt-msg2');
@@ -2735,8 +2800,10 @@ function msgOpenBot(bid, silent){
     var seen = msgSeen(bid);
     var unread = {};
     // 用「未读接口」算每个会话的未读
-    api('/api/archive/' + bid + '/unread?seen='
+    return api('/api/archive/' + bid + '/unread?seen='
         + encodeURIComponent(JSON.stringify(seen))).then(function(u){
+      if(version !== MSG.VERSION || CUR_TAB !== 'msg') return;
+      if(!u.ok) throw new Error(u.error || '读取失败');
       unread = (u && u.unread) || {};
       // ★ 置顶的群排前面（跟 /messages 那页共用同一份置顶数据）
       var pinned = getPinChats(bid);
@@ -2790,24 +2857,25 @@ function msgOpenBot(bid, silent){
           + '</td></tr>';
       });
       setHTML('msgChats', h + '</table></div>');
-    }).catch(function(){
-      setHTML('msgChats', '<div class="empty">读取失败</div>');
+      return true;
     });
   }).catch(function(e){
-    setHTML('msgChats',
-            '<div class="empty">' + esc(e.message || '读取失败') + '</div>');
-  });
+    if(version === MSG.VERSION && CUR_TAB === 'msg' && !silent)
+      setHTML('msgChats', '<div class="empty">' + esc(e.message || '读取失败') + '</div>');
+    return false;
+  }).finally(function(){if(version === MSG.VERSION)MSG.LOADING = false;});
 }
 
 /* ---- 第 3 级：群内消息 ---- */
 function msgOpenChat(cid, title){
+  MSG.VERSION++;
   MSG.CHAT = cid;
   MSG.CHAT_TITLE = title || cid;
   var el = document.getElementById('msgChatName');
   // ★ 显示**群名称**，不是那串 id（用户看不懂 -5187880290 是什么）
   if(el) el.textContent = MSG.CHAT_TITLE;
   msgGoto(3);      // msgGoto 里会把轮询拉起来
-  msgLoadMsgs();
+  return msgLoadMsgs();
 }
 
 /* ================= 群成员 =================
@@ -2835,8 +2903,10 @@ function msgLoadMembers(){
   var box = document.getElementById('memBox');
   if(!box || !MSG.BID) return;
   box.innerHTML = '<div class="empty" style="padding:16px">加载中…</div>';
+  var version = MSG.VERSION;
   api('/api/archive/' + MSG.BID + '/members?chat='
       + encodeURIComponent(MSG.CHAT)).then(function(d){
+    if(version !== MSG.VERSION || CUR_TAB !== 'msg') return;
     if(!d.ok) throw new Error(d.error || '读取失败');
     var rows = d.members || [];
     MEM.loaded = true;
@@ -2866,13 +2936,14 @@ function msgLoadMembers(){
     });
     box.innerHTML = html;
   }).catch(function(e){
+    if(version !== MSG.VERSION) return;
     MEM.loaded = false;      // 失败了下次点还能重试
     box.innerHTML = '<div class="empty" style="padding:16px">'
       + esc(e.message || '读取失败') + '</div>';
   });
 }
 
-function msgLoadMsgs(){
+function msgLoadMsgs(keepScroll){
   var box = document.getElementById('msgStream');
   if(!box) return;
   // ★ 这里是**故意**直写的，跟别处不一样：
@@ -2880,16 +2951,23 @@ function msgLoadMsgs(){
   //     所以不存在「缓存和 DOM 对不上 → 卡在加载中」的问题
   //   · 而且它一次打开只跑一遍，不参与轮询
   //   ★ 哪天要把 msgStream 也改成 setHTML，这里必须一起改，否则就会卡住
-  box.innerHTML = '<div class="empty">加载中…</div>';
-  MSG.SEEN = {}; MSG.CURSOR = '';
+  var previousTop = box.scrollTop, bottom = msgNearBottom();
+  if(!keepScroll) box.innerHTML = '<div class="empty">加载中…</div>';
+  var version = MSG.VERSION;
+  MSG.LOADING = true;
+  MSG.SEEN = {}; MSG.CURSOR = ''; MSG.SEQ = 0;
+  document.getElementById('msgNew').style.display = 'none';
   // ★ 换会话了：成员表是要重拉的（每个群的成员不一样），顺手收起来
   MEM.loaded = false;
   var mbox = document.getElementById('memBox');
   if(mbox){ mbox.style.display = 'none'; mbox.innerHTML = ''; }
-  api('/api/archive/' + MSG.BID + '/messages?limit=200&chat='
+  return api('/api/archive/' + MSG.BID + '/messages?limit=200&chat='
       + encodeURIComponent(MSG.CHAT)).then(function(d){
+    if(version !== MSG.VERSION || CUR_TAB !== 'msg') return;
     if(!d.ok) throw new Error(d.error || '读取失败');
     var rows = d.messages || [];
+    MSG.SEQ = Math.max(0, ...rows.map(m => m.archive_seq || 0));
+    MSG.CURSOR = newestTs(rows);
     // 拿群名（会话列表里那份）
     var c3 = document.getElementById('cnt-msg3');
     if(c3) c3.textContent = '（' + rows.length + ' 条）';
@@ -2910,21 +2988,59 @@ function msgLoadMsgs(){
               ? '<div class="newline">↓ 上次看到这里，下面是新消息 ↓</div>' : '')
            + msgBubble(m);
     }).join('');
-    if(jumpKey) msgScrollToKey(jumpKey); else msgScrollBottom();
+    if(keepScroll && !bottom) box.scrollTop = previousTop;
+    else if(jumpKey && !keepScroll) msgScrollToKey(jumpKey); else msgScrollBottom();
     msgLoadImages();
-    // 打开会话 = 已读
-    var seen = msgSeen(MSG.BID);
-    seen[String(MSG.CHAT)] = MSG.CURSOR;
-    msgSaveSeen(MSG.BID, seen);
+    MSG.LOADING = false;
+    msgMarkRead();
+    return true;
   }).catch(function(e){
+    if(version !== MSG.VERSION || CUR_TAB !== 'msg') return;
     box.innerHTML = '<div class="empty">' + esc(e.message || '读取失败') + '</div>';
-  });
+    return false;
+  }).finally(function(){if(version === MSG.VERSION) MSG.LOADING = false;});
 }
 
 function newestTs(rows){
   var m = '';
   rows.forEach(function(x){ if(x.ts && x.ts > m) m = x.ts; });
   return m;
+}
+
+function msgReplyHtml(m){
+  var r = m.reply;
+  if(!r) return '';
+  return '<div class="msg-reply" role="button" tabindex="0" data-reply-key="'
+    + esc(m.chat_id + '|' + r.message_id) + '" onclick="msgShowReply(this)" onkeydown="if(event.key===\'Enter\')msgShowReply(this)">'
+    + (r.media ? '<img data-name="' + esc(r.media) + '">' : (r.has_photo ? '<span class="muted" data-reply-pending="1">图片</span>' : ''))
+    + '<div><b>回复 ' + esc(r.display_name || r.username || '原消息') + '</b>'
+    + '<div class="msg-reply-text">' + esc(r.text || '[消息]') + '</div></div></div>';
+}
+
+function msgShowReply(el){
+  var key = el.getAttribute('data-reply-key');
+  var target = Array.prototype.find.call(document.querySelectorAll('#msgStream .mb[data-key]'),
+    function(node){return node.getAttribute('data-key')===key;});
+  if(!target){toast('原消息不在当前列表中，引用内容已显示在回复上方');return;}
+  msgScrollToKey(key);
+  target.classList.add('msg-reply-focus');
+  setTimeout(function(){target.classList.remove('msg-reply-focus');},1800);
+}
+
+function msgRefreshReplyMedia(){
+  if(!document.querySelector('#msgStream [data-reply-pending]')) return;
+  var version = MSG.VERSION;
+  api('/api/archive/' + MSG.BID + '/messages?limit=200&chat=' + encodeURIComponent(MSG.CHAT))
+    .then(function(d){
+      if(version !== MSG.VERSION || !d.ok) return;
+      var rows = {};
+      (d.messages || []).forEach(function(m){rows[keyOf(m)] = m;});
+      Array.prototype.forEach.call(document.querySelectorAll('#msgStream .mb[data-key]'), function(el){
+        var m = rows[el.getAttribute('data-key')], quote = el.querySelector('.msg-reply [data-reply-pending]');
+        if(m && m.reply && m.reply.media && quote) quote.closest('.msg-reply').outerHTML = msgReplyHtml(m);
+      });
+      msgLoadImages();
+    }).catch(function(){});
 }
 
 function msgBubble(m){
@@ -2946,7 +3062,7 @@ function msgBubble(m){
     + '<div class="mmeta"><b>' + esc(name) + '</b>'
     + (extra ? ' <span class="muted">' + extra + '</span>' : '')
     + ' <span class="muted">' + fmtTs(m.ts) + '</span></div>'
-    + '<div class="bb">' + esc(m.text)
+    + '<div class="bb">' + msgReplyHtml(m) + esc(m.text)
     + (m.media ? '<img data-name="' + esc(m.media) + '">' : '')
     + '</div></div></div>';
 }
@@ -2973,7 +3089,7 @@ function firstUnreadKey(rowsAsc, lastSeen){
   for(var k = 0; k < (rowsAsc || []).length; k++){
     var m = rowsAsc[k];
     if(m && m.is_bot) continue;
-    if(m && m.ts > (lastSeen || '')) return keyOf(m);
+    if(m && (typeof lastSeen === 'object' ? m.archive_seq > lastSeen.seq : m.ts > (lastSeen || ''))) return keyOf(m);
   }
   return '';
 }
@@ -3031,8 +3147,7 @@ function msgLoadImages(){
 }
 
 function msgStartLive(){
-  msgStopLive();
-  MSG.TIMER = setInterval(msgPoll, 3000);
+  if(!MSG.TIMER) MSG.TIMER = setInterval(msgPoll, 2000);
 }
 
 function msgStopLive(){
@@ -3042,41 +3157,63 @@ function msgStopLive(){
 /* ★ 一个定时器管三级：看哪一级就刷哪一级。
    三级各跑一个定时器的话，切来切去会堆一堆没用的轮询。 */
 function msgPoll(){
-  if(CUR_TAB !== 'msg' || document.hidden) return;
-  if(MSG.LEVEL === 1){ msgLoadBots(true); return; }
-  if(MSG.LEVEL === 2){ if(MSG.BID) msgOpenBot(MSG.BID, true); return; }
-  if(MSG.LEVEL === 3){ msgTick(); return; }
+  if(CUR_TAB !== 'msg' || document.hidden || MSG.BUSY || MSG.LOADING) return;
+  return msgUpdate();
+}
+
+function msgUpdate(){
+  if(MSG.BUSY || MSG.LOADING) return Promise.resolve(false);
+  MSG.BUSY = true;
+  var task = MSG.LEVEL === 1 ? msgLoadBots(true)
+    : MSG.LEVEL === 2 ? msgOpenBot(MSG.BID, true) : msgTick();
+  return Promise.resolve(task).finally(function(){MSG.BUSY = false;});
+}
+
+function msgRefresh(button){
+  if(MSG.BUSY || MSG.LOADING){toast('正在更新，请稍候');return;}
+  button.disabled = true; button.textContent = '刷新中…';
+  Promise.resolve(MSG.LEVEL === 3 ? msgLoadMsgs(true) : msgUpdate()).then(function(ok){toast(ok === false ? '刷新失败，请重试' : '已刷新');})
+    .catch(function(){toast('刷新失败，请重试');})
+    .finally(function(){button.disabled = false;button.textContent = '↻ 刷新';});
+}
+
+function msgMarkRead(){
+  if(MSG.LEVEL !== 3 || !MSG.CHAT || document.hidden || MSG.LOADING) return;
+  var seen = msgSeen(MSG.BID);
+  seen[String(MSG.CHAT)] = {ts: MSG.CURSOR, seq: MSG.SEQ};
+  msgSaveSeen(MSG.BID, seen);
+  document.getElementById('msgNew').style.display = 'none';
 }
 
 function msgTick(){
-  if(!MSG.BID || !MSG.CHAT || MSG.BUSY) return;
-  MSG.BUSY = true;
-  api('/api/archive/' + MSG.BID + '/since?limit=200&after='
-      + encodeURIComponent(MSG.CURSOR || ''))
+  if(!MSG.BID || !MSG.CHAT) return;
+  msgRefreshReplyMedia();
+  var version = MSG.VERSION;
+  return api('/api/archive/' + MSG.BID + '/since?limit=200&chat='
+      + encodeURIComponent(MSG.CHAT) + '&after_seq=' + MSG.SEQ)
     .then(function(d){
-      if(!d.ok) return;
-      if(d.newest && d.newest > MSG.CURSOR) MSG.CURSOR = d.newest;
-      var mine = (d.messages || []).filter(function(m){
-        return String(m.chat_id) === String(MSG.CHAT)
-            && !MSG.SEEN[m.chat_id + '|' + m.message_id];
-      });
-      if(!mine.length) return;
-      mine.forEach(function(m){ MSG.SEEN[m.chat_id + '|' + m.message_id] = 1; });
+      if(version !== MSG.VERSION || CUR_TAB !== 'msg') return;
+      if(!d.ok) throw new Error(d.error || '读取失败');
+      var rows = d.messages || [];
+      if(rows.length) MSG.SEQ = Math.max(...rows.map(m => m.archive_seq || 0));
+      MSG.CURSOR = newestTs(rows) > MSG.CURSOR ? newestTs(rows) : MSG.CURSOR;
+      var mine = rows.filter(function(m){return !MSG.SEEN[keyOf(m)];});
+      if(!mine.length) return true;
+      mine.forEach(function(m){MSG.SEEN[keyOf(m)] = 1;});
       var box = document.getElementById('msgStream');
-      if(!box) return;
+      var bottom = msgNearBottom();
       if(box.querySelector('.empty')) box.innerHTML = '';
-      box.insertAdjacentHTML('beforeend',
-        mine.slice().reverse().map(msgBubble).join(''));
-      // ★★ 只有你本来就贴着底部时才自动滚下去。
-      //    不判断的话，每 3 秒轮询一来就把你从老消息那儿硬拽到底部 ——
-      //    手机上就是「滑一下被弹回去」那种晃动。
-      if(msgNearBottom()) msgScrollBottom();
+      box.insertAdjacentHTML('beforeend', mine.slice().reverse().map(msgBubble).join(''));
+      document.getElementById('cnt-msg3').textContent = '（' + box.querySelectorAll('.mb').length + ' 条）';
+      if(bottom){msgScrollBottom();msgMarkRead();}
+      else document.getElementById('msgNew').style.display = '';
       msgLoadImages();
-      var seen = msgSeen(MSG.BID);
-      seen[String(MSG.CHAT)] = MSG.CURSOR;
-      msgSaveSeen(MSG.BID, seen);
-    }).catch(function(){}).then(function(){ MSG.BUSY = false; });
+      return true;
+    }).catch(function(){return false;});
 }
+
+document.addEventListener('visibilitychange', function(){if(!document.hidden)msgPoll();});
+window.addEventListener('storage', function(e){if(e.key && e.key.indexOf('panel_seen_') === 0)msgPoll();});
 
 /* ---- 面包屑导航 ----
    ★★ 切到哪一级就**立刻重画那一级** —— 光切显隐的话，
@@ -3088,6 +3225,7 @@ function msgGoto(level, skipLoad){
   var l2 = document.getElementById('msgLv2');
   var l3 = document.getElementById('msgLv3');
   if(!l1) return;
+  if(MSG.LEVEL !== level){MSG.VERSION++; MSG.LOADING = false;}
   MSG.LEVEL = level;
   l1.style.display = (level === 1) ? '' : 'none';
   l2.style.display = (level === 2) ? '' : 'none';

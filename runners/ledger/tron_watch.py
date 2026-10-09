@@ -39,6 +39,7 @@ import time
 from html import escape
 
 import core
+import customer_config as CC
 from core import log
 from . import tron_chain as tc
 
@@ -112,7 +113,7 @@ class TronWatch:
 
     def __init__(self, runner):
         self.r = runner
-        self.path = os.path.join(core.DATA_DIR,
+        self.path = os.path.join(core.bot_data_dir(runner.bot),
                                  '%s.watches.sqlite3' % runner.bid)
         self._lock = threading.Lock()
         self._busy = False            # 扫链线程在跑（防 on_tick 反复起线程）
@@ -156,7 +157,7 @@ class TronWatch:
     #    脱敏脚本会把副本里的替换成占位符（别人克隆下来是坏的），
     #    而真密钥会留在公开仓库的历史里 —— 这就是 `totp_secret` 刚出事的方式。
     #    `data/` 目录**不推送、不进日志、不进归档**，所以放这儿是安全的。
-    def keys(self):
+    def custom_keys(self):
         """当前配了哪几把 Key（去重、去空）。旧的单把 `tron_key` 也认"""
         out = []
         raw = self.r.data.get('tron_keys')
@@ -171,6 +172,11 @@ class TronWatch:
                 seen.add(k)
                 uniq.append(k)
         return uniq
+
+    def keys(self):
+        own = self.custom_keys()
+        shared = self.r.mgr.cfg.get('tron_api_keys') or []
+        return own or list(dict.fromkeys(str(k).strip() for k in shared if str(k).strip()))
 
     def _key_cooling(self, key):
         """这把 Key 现在是不是在「刚被限流，先别用」的冷却期"""
@@ -307,7 +313,7 @@ class TronWatch:
         return {(r['coin'], r['direction']): r['s'] for r in rows}
 
     # ================= 查询卡片 =================
-    def card(self, buyer, address):
+    def card(self, buyer, address, *, include_hint=True):
         """查一次，返回 (文本, 键盘)。★ 要联网 —— 调用方负责放进线程
 
         ★★ 余额和交易记录**并行查**（原来是先查完余额再查记录，白白多等一轮）。
@@ -317,6 +323,9 @@ class TronWatch:
         watch = self.one(buyer, address)
         title = (watch or {}).get('note') or '地址查询'
         box = {}
+        features = CC.settings(self.r.bot)['features']
+        if buyer > 0:
+            features.update(tron_balance=True, tron_details=True, balance_trx=True, balance_usdt=True)
 
         def _balance():
             try:
@@ -334,9 +343,28 @@ class TronWatch:
             except Exception as e:                      # noqa: BLE001
                 box['tx_err'] = e
 
+        def _count():
+            try:
+                import requests
+                response = requests.get('https://apilist.tronscanapi.com/api/accountv2',
+                                        params={'address': address}, timeout=(5, 15))
+                response.raise_for_status()
+                value = response.json().get('totalTransactionCount')
+                if type(value) is not int or value < 0:
+                    raise ValueError('invalid count')
+                box['count'] = value
+            except Exception:
+                box['count'] = None
+
         # ★ 两个都放后台线程，然后**一起等** —— 总耗时 ≈ 慢的那个，不是两个相加
-        workers = [threading.Thread(target=f, daemon=True, name='troncard')
-                   for f in (_balance, _records)]
+        queries = []
+        if features['tron_balance']:
+            queries.append(_balance)
+        if features['tron_details']:
+            queries.append(_records)
+        if features['tron_count']:
+            queries.append(_count)
+        workers = [threading.Thread(target=f, daemon=True, name='troncard') for f in queries]
         for w in workers:
             w.start()
         for w in workers:
@@ -348,9 +376,14 @@ class TronWatch:
         records = box.get('tx') or []
         rate_limited = False
 
-        if 'bal' in box:
+        if not features['tron_balance']:
+            balance_text = ''
+        elif 'bal' in box:
             balance_text = (box['bal'].replace('TRX：', '💎 TRX 余额：')
                                     .replace('USDT：', '💰 USDT 余额：'))
+            balance_text = '\n'.join(line for line in balance_text.splitlines()
+                                     if not ('USDT' in line and not features['balance_usdt'])
+                                     and not ('TRX' in line and not features['balance_trx']))
         else:
             e = box.get('bal_err')
             # ★★ 查不到就明说查不到，**绝不显示 0** —— 客户看见 0 会以为钱没了
@@ -364,7 +397,7 @@ class TronWatch:
             '转入' if tx['to'] == address else '转出',
             tc.amount(tx['amount'])) for tx in records[:CARD_TX]]
         tx_note = ''
-        if not entries:
+        if not entries and features['tron_details']:
             if 'tx_err' in box:
                 e = box['tx_err']
                 # ★ 分三种情况说清楚：网络问题 / 没有记录 / 没查到
@@ -381,43 +414,38 @@ class TronWatch:
         lines = [
             '<blockquote><b>%s</b>\n<code>%s</code></blockquote>'
             % (escape(title), address),
-            '最近 %d 笔 USDT 交易（已确认）：' % CARD_TX,
         ]
+        if features['tron_details']:
+            lines.append('最近 %d 笔 USDT 交易（已确认）：' % CARD_TX)
         if entries:
             lines.append('<pre>' + escape('\n'.join(entries)) + '</pre>')
         if tx_note:
             lines.append(escape(tx_note))
-        lines += [
-            escape(balance_text),
+        if balance_text:
+            lines.append(escape(balance_text))
+        if features['tron_count']:
+            count = box.get('count')
+            lines.append('链上累计交易次数：' + (str(count) if count is not None else '暂未获取，不代表0'))
+        if features['tron_balance'] or features['tron_details']:
+            lines += [
             '⏰ 创建时间：' + tc.when(account.get('create_time')),
             '🕒 最近操作：' + tc.when(max(operations, default=0)),
             '时间：UTC+8 · 仅 TRX/USDT',
         ]
         # ★ 没配 Key 就顺势把「怎么配」讲清楚（尤其刚被限流过的时候）
-        lines += self.key_hint(rate_limited)
-        return '\n'.join(lines), self.card_kb(address, watch)
+        if buyer > 0 and include_hint:
+            lines += self.key_hint(rate_limited)
+        return '\n'.join(lines), self.card_kb(address, watch) if buyer > 0 else None
 
     def key_hint(self, urgent=False):
-        """★ 没配 TronGrid Key 时的中文引导（配了就不出现）
-
-        ★ 只讲**申请查询 Key**这件事，并且明确说「这不是钱包私钥」——
-          这类提示最怕用户理解成「要发私钥」，那才是真出事。
-        """
-        if self.keys():        # ★ 判「有没有配」要用 keys()，别用 next_key()
-            return []          #   （那个会白转一格轮询计数器）
-        head = ('\n<b>🔑 还没绑定 TRX/USDT 查询密钥</b>' +
-                ('（刚才那次查询被限流了）' if urgent else '') + '\n')
-        return [head + escape(
-            '公共接口限流很紧，人多的时候会查不出来。\n'
-            '到 trongrid.io 注册后，在控制台的 API Keys 页面建查询 Key，'
-            '然后直接私聊发给机器人，或者发：\n'
-            '设置密钥 你的APIKey\n'
-            '★ 可以多建几把，用「添加密钥 你的Key」加进来（最多 %d 把），'
-            '机器人会轮着用，一把被限流自动换下一把。' % MAX_KEYS) +
-            '\n申请入口：https://trongrid.io/\n'
-            '发 <code>密钥列表</code> 看现在配了几把。\n'
-            '<b>那只是查询用的 Key，不是钱包私钥 —— '
-            '绝对不要发钱包私钥或助记词。</b>']
+        """未绑定独立查询 Key 时显示申请和小程序绑定提示。"""
+        if self.custom_keys():
+            return []
+        return ['\n<b>💡 温馨提示</b>\n'
+                '为保证查询速度及稳定性，可以自行申请免费的 API Key，'
+                '在 TG 小程序「地址查询与密钥」中单独绑定使用。\n'
+                '机器人拥有者可在配置中心绑定，申请入口：'
+                '<a href="https://trongrid.io/">https://trongrid.io/</a>']
 
     def card_kb(self, address, watch):
         head = ([{'text': '⚙️ 管理此地址', 'callback_data': PREFIX + 'd:' + address}]
@@ -442,6 +470,8 @@ class TronWatch:
         address = (address or '').strip()
 
         def work():
+            if self.r.expired():
+                return
             placeholder = None
             if not mid:
                 # ★ send_html 返回的是 TG 的整个结果，要取 message_id 才能改它
@@ -460,6 +490,8 @@ class TronWatch:
                     self.r.send_html(chat_id, '❌ 查询失败，请稍后再试。')
                 return
             target = mid or placeholder
+            if self.r.expired() or (chat_id < 0 and not CC.feature(self.r.bot, 'tron_verify')):
+                return
             if target:
                 self.r.edit_html(chat_id, target, text, kb=kb)
             else:
@@ -801,23 +833,26 @@ class TronWatch:
 
     def alert(self, w, tx):
         """★ 谁加的监听就发给谁（私聊）"""
-        direction = '转入' if tx['to'] == w['address'] else '转出'
-        lines = [escape(w['note'] or '地址监听'),
-                 '%s 已确认%s <b>%s</b>' % (tx['coin'], direction,
-                                            tc.amount(tx['amount'])),
-                 '监听地址：<code>%s</code>' % w['address'],
-                 # ★★ 付款方/收款方（也就是转入地址、转出地址）**总是显示**。
-                 #    用户 2026-09-29 要的：原来这两个只在「详细」格式里，
-                 #    默认的「简洁」格式看不到 —— 而对账就得看钱从哪来、
-                 #    到哪去，光有个金额没用。
-                 '付款方：<code>%s</code>' % tx['from'],
-                 '收款方：<code>%s</code>' % tx['to']]
-        if w['detailed']:
-            lines += ['时间：%s UTC+8' % tc.when(tx['timestamp']),
-                      '交易：<code>%s</code>' % tx['hash']]
+        incoming = tx['to'] == w['address']
+        balances = {'USDT': '暂未获取（不代表0）', 'TRX': '暂未获取（不代表0）'}
+        try:
+            rows = self.call_with_key(lambda k: tc.chain_get(w['address'], {'only_confirmed': 'true'}, k))
+            value, _ = tc.balances(rows, w['address'])
+            balances = dict(line.split('：', 1) for line in value.splitlines())
+            assert set(balances) == {'TRX', 'USDT'}
+        except Exception:
+            balances = {'USDT': '暂未获取（不代表0）', 'TRX': '暂未获取（不代表0）'}
+        lines = ['📣 <b>%s</b>' % escape(w['note'] or '地址监听'), '',
+                 '交易金额：<b>%s %s %s</b>' % ('+' if incoming else '-', tc.amount(tx['amount']), tx['coin']),
+                 '交易类型：' + ('收入 ⬇️' if incoming else '支出 ⬆️'),
+                 '收款地址：<code>%s</code>%s' % (escape(tx['to']), ' ← 监控地址' if tx['to'] == w['address'] else ''),
+                 '支付地址：<code>%s</code>%s' % (escape(tx['from']), ' ← 监控地址' if tx['from'] == w['address'] else ''), '',
+                 'USDT余额：' + balances['USDT'],
+                 'TRX余额：' + balances['TRX'],
+                 '转账时间：' + tc.when(tx['timestamp'])]
         kb = {'inline_keyboard': [[
-            {'text': '查看这笔交易', 'url': tx_url(tx['hash'])},
-            {'text': '账单统计', 'callback_data': PREFIX + 'stats:' + w['address']}]]}
+            {'text': '⚙️ 管理地址', 'callback_data': PREFIX + 'd:' + w['address']},
+            {'text': '📊 账单统计', 'callback_data': PREFIX + 'stats:' + w['address']}]]}
         try:
             got = self.r.send_html(w['buyer'], '\n'.join(lines), kb=kb)
         except Exception as e:

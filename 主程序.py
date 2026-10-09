@@ -25,6 +25,8 @@ from core import gen_code, load_json, log, save_json
 from manager import BotManager
 from merchants import MerchantStore
 from panel import PanelHandler
+from server_monitor import ServerMonitor
+from nodes import for_manager
 
 CONFIG_TEMPLATE = {
     "host": "127.0.0.1",
@@ -96,6 +98,7 @@ def main():
     os.makedirs(core.DATA_DIR, exist_ok=True)
     cfg = load_cfg()
     mgr = BotManager(cfg)
+    for_manager(mgr).start()
 
     host = cfg.get('host') or '127.0.0.1'
     port = int(cfg.get('port') or 8080)
@@ -138,7 +141,8 @@ def main():
         print('  ⚠️ %s' % fallback_note)
         print()
     print('  面板地址：%s' % url)
-    print('  面板密码：%s' % cfg['password'])
+    if sys.stdout and sys.stdout.isatty():
+        print('  面板密码：%s' % cfg['password'])
     n_merch = PanelHandler.merch.count() if PanelHandler.merch else 0
     if n_merch:
         print('  商户账号：%d 个（他们自己登录用 %s/m，账号密码在面板里建）'
@@ -158,11 +162,13 @@ def main():
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     mgr.start_all()
     mgr.start_watchdog()      # 到期检查：到点停用，停用满 7 天自动删除
+    mgr.server_monitor = ServerMonitor(mgr).start()
 
-    try:
-        webbrowser.open(url)
-    except Exception:
-        pass
+    if sys.stdin and sys.stdin.isatty():
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass
 
     try:
         while True:
@@ -170,6 +176,8 @@ def main():
     except KeyboardInterrupt:
         print('\n正在停止…')
         mgr.stop_all()
+        mgr.nodes.close()
+        mgr.server_monitor.close()
         httpd.shutdown()
         print('已停止。')
 

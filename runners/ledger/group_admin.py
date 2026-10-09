@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import time
+from customer_config import DEFAULT_WELCOME as DEFAULT_NEWBIE_WELCOME
 
 # 群消息 48 小时后 TG 不让删；这几个错误说明「这条删不掉」，跳过继续
 # （注意：不能因为某条删不掉就认为后面的也删不掉）
@@ -38,7 +39,6 @@ DEFAULT_WELCOME = (
 #   DEFAULT_WELCOME      机器人**自己被拉进群**时说的话（面板里能配）
 #   DEFAULT_NEWBIE_WELCOME  **新成员进群**时欢迎他（主人发「设置欢迎语」配）
 #   `{name}` 会换成那个人的可点击名字。
-DEFAULT_NEWBIE_WELCOME = '💐欢迎{name}加入该群~'
 
 
 # ================= 权限 =================

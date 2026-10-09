@@ -459,12 +459,12 @@ class StoreShim:
     def __init__(self, mgr, bot):
         self.mgr = mgr
         self.bot = bot
-        self.path = os.path.join(core.DATA_DIR, '%s.json' % bot['id'])
+        self.path = os.path.join(core.bot_data_dir(bot), '%s.json' % bot['id'])
         data = core.load_json(self.path, {})
         self.data = data if isinstance(data, dict) else {}
 
     def save_data(self):
-        os.makedirs(core.DATA_DIR, exist_ok=True)
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
         try:
             core.save_json(self.path, self.data)
         except Exception as e:

@@ -28,7 +28,6 @@ from pathlib import Path
 
 import requests
 
-import core
 # ★★ 这个 import 以前**漏了**，而下面 550 多行在用它 ——
 #    那几行在「下载图片」的后台线程里，而且嵌在 except 里：
 #    一旦某张图下载失败，log(...) 抛 NameError → 被外层 except 接住 →
@@ -82,6 +81,17 @@ def _db(path, timeout=5):
 
 def _now_iso():
     return datetime.now(TZ).isoformat()
+
+
+def _reply_preview(message):
+    sender = message.get('sender_chat') or message.get('from') or {}
+    kind = next((k for k in KIND_ORDER if k in message), 'text')
+    return dict(message_id=str(message['message_id']),
+                display_name=sender.get('title') or ' '.join(filter(None, [sender.get('first_name'), sender.get('last_name')])),
+                username=sender.get('username', ''), kind=kind,
+                text=message.get('text') or message.get('caption') or '[%s]' % KIND_LABELS[kind],
+                has_photo=bool(message.get('photo') or (message.get('document') or {}).get('mime_type', '').startswith('image/')),
+                media='')
 
 
 class MessageArchive:
@@ -149,13 +159,19 @@ class MessageArchive:
         """
         mute = {str(x) for x in (mute or ())}
         photo_pending = False
+        messages = []
+        for item in (result if isinstance(result, list) else [result]):
+            if not isinstance(item, dict):
+                continue
+            message = next((item[k] for k in ('message', 'edited_message', 'channel_post', 'edited_channel_post') if k in item), item)
+            reply = message.get('reply_to_message') or {}
+            chat = message.get('chat') or {}
+            if reply.get('message_id') and str((reply.get('chat') or chat).get('id')) == str(chat.get('id')):
+                # Bot API includes the original message even when the poller missed it.
+                messages.append((dict(reply, chat=chat), False))
+            messages.append((message, is_own))
         with self._lock, _db(self.path, timeout=5) as db:
-            for item in (result if isinstance(result, list) else [result]):
-                if not isinstance(item, dict):
-                    continue
-                message = next((item[k] for k in
-                                ('message', 'edited_message', 'channel_post',
-                                 'edited_channel_post') if k in item), item)
+            for message, own in messages:
                 chat = message.get('chat') or {}
                 if (not chat.get('id') or not message.get('message_id')
                         or not message.get('date')):
@@ -191,7 +207,7 @@ class MessageArchive:
                     'user_id': sender.get('id', ''),
                     # 自己发的也标成 is_bot —— 归档里本来就分「人说的」和
                     # 「机器人说的」，界面上是两种样式
-                    'is_bot': bool(is_own or sender.get('is_bot')),
+                    'is_bot': bool(own or sender.get('is_bot')),
                     'is_owner': bool(self.owner_id)
                                 and str(sender.get('id')) == self.owner_id,
                     'kind': kind,
@@ -202,6 +218,9 @@ class MessageArchive:
                     'has_photo': bool(file_id),
                     'edited': bool(message.get('edit_date')),
                 }
+                reply = message.get('reply_to_message') or {}
+                if reply.get('message_id') and str((reply.get('chat') or chat).get('id')) == str(chat['id']):
+                    event['reply'] = _reply_preview(reply)
                 if event['ts'] < self.cutoff_iso():
                     continue        # 超过保留期的不存（原版是 24 小时）
                 key = (event['chat_id'], event['message_id'])
@@ -250,6 +269,7 @@ class MessageArchive:
                                suffix)
         self.media.mkdir(parents=True, exist_ok=True)
         with self._lock, _db(self.path) as db:
+            db.execute('BEGIN IMMEDIATE')
             row = db.execute('SELECT payload FROM events'
                              ' WHERE chat_id=? AND message_id=? AND file_id=?',
                              (str(cid), str(mid), file_id)).fetchone()
@@ -257,7 +277,7 @@ class MessageArchive:
                 # 没这条记录就别存图 —— 跟 _download 里那条判断一个道理，
                 # 不然图会永远留在磁盘上没人清
                 return False
-            (self.media / name).write_bytes(bytes(data))
+            (self.media / name).write_bytes(data)
             event = json.loads(row[0])
             event['media'] = name
             # ★ 补上 media 之后，后台下载线程会因为 media != '' 自动跳过这条
@@ -270,24 +290,23 @@ class MessageArchive:
 
     # ================= 清 =================
     def prune(self):
-        """删过期的消息和它们的图（原版是 24 小时，这里按面板配的天数）"""
+        """删过期消息和无引用图片，保留最近 48 小时记录。"""
         cutoff = self.cutoff_iso()
         with self._lock, _db(self.path) as db:
             db.execute('DELETE FROM events WHERE ts < ?', (cutoff,))
             keep = set()
-            for (payload,) in db.execute('SELECT payload FROM events'):
-                name = (json.loads(payload) or {}).get('media') or ''
-                if name:
-                    keep.add(name)
-        removed = 0
-        if self.media.is_dir():
-            for p in self.media.iterdir():
-                if p.is_file() and p.name not in keep:
-                    try:
-                        p.unlink()
-                        removed += 1
-                    except OSError:
-                        pass
+            keep.update(row[0] for row in db.execute(
+                "SELECT DISTINCT json_extract(payload,'$.media') FROM events "
+                "WHERE COALESCE(json_extract(payload,'$.media'),'') != ''"))
+            removed = 0
+            if self.media.is_dir():
+                for p in self.media.iterdir():
+                    if p.is_file() and p.name not in keep:
+                        try:
+                            p.unlink()
+                            removed += 1
+                        except OSError:
+                            pass
         return removed
 
     def forget_chat(self, chat_id):
@@ -320,21 +339,48 @@ class MessageArchive:
                 pass
 
     # ================= 读（给面板用）=================
+    def _read_messages(self, db, rows):
+        out = []
+        for row in rows:
+            payload = row[0]
+            try:
+                event = json.loads(payload)
+            except (ValueError, TypeError):
+                continue
+            if len(row) > 1:
+                event['archive_seq'] = row[1]
+            reply = event.get('reply')
+            if reply:
+                original = db.execute('SELECT payload FROM events WHERE chat_id=? AND message_id=?',
+                                      (event['chat_id'], reply['message_id'])).fetchone()
+                if original:
+                    original = json.loads(original[0])
+                    reply['media'] = original.get('media', '')
+                    if not reply.get('display_name'):
+                        reply['display_name'] = original.get('display_name', '')
+                        reply['username'] = original.get('username', '')
+                    if reply.get('text') == '[消息]':
+                        reply['text'] = original.get('text', reply['text'])
+                        reply['kind'] = original.get('kind', 'text')
+                        reply['has_photo'] = original.get('has_photo', False)
+            out.append(event)
+        return out
+
     def chats(self):
         """记录里出现过的群/会话，按最后发言时间倒序"""
         with self._lock, _db(self.path) as db:
             rows = db.execute(
                 'SELECT chat_id, MAX(ts) AS last_ts, COUNT(*) AS n,'
                 '       json_extract(payload,"$.chat_title") AS title,'
-                '       json_extract(payload,"$.chat_type") AS ctype'
+                '       json_extract(payload,"$.chat_type") AS ctype, MAX(rowid)'
                 ' FROM events GROUP BY chat_id ORDER BY last_ts DESC'
             ).fetchall()
         return [{'chat_id': r[0], 'last_ts': r[1], 'count': r[2],
-                 'title': r[3] or r[0], 'type': r[4] or ''} for r in rows]
+                 'title': r[3] or r[0], 'type': r[4] or '', 'last_seq': r[5]} for r in rows]
 
     def messages(self, chat_id='', keyword='', limit=200, before=''):
         """列消息。keyword 会在发言人和正文里找"""
-        sql = 'SELECT payload FROM events WHERE 1=1'
+        sql = 'SELECT payload, rowid FROM events WHERE 1=1'
         args = []
         if chat_id:
             sql += ' AND chat_id=?'
@@ -357,21 +403,30 @@ class MessageArchive:
         args.append(max(1, min(int(limit or 200), 1000)))
         with self._lock, _db(self.path) as db:
             rows = db.execute(sql, args).fetchall()
-        out = []
-        for (payload,) in rows:
-            try:
-                out.append(json.loads(payload))
-            except (ValueError, TypeError):
-                continue
-        return out
+            return self._read_messages(db, rows)
 
-    def messages_since(self, after, chat_id='', limit=200):
+    def messages_since(self, after, chat_id='', limit=200, after_seq=None):
         """只取比 after 新的消息 —— 页面「实时刷新」用
 
         ★ 用 `ts >= after`（含等于）：同一秒里可能有好几条，
           用 `>` 会漏掉和游标同一秒的后半截。
           代价是可能重复返回游标那条 —— 客户端按 (会话,消息id) 去重，很简单。
         """
+        if after_seq is not None:
+            with self._lock, _db(self.path) as db:
+                cursor = max(0, int(after_seq))
+                newest = db.execute('SELECT MAX(rowid) FROM events').fetchone()[0] or 0
+                if cursor > newest:
+                    cursor = 0
+                sql = 'SELECT payload, rowid FROM events WHERE rowid > ?'
+                args = [cursor]
+                if chat_id:
+                    sql += ' AND chat_id=?'
+                    args.append(str(chat_id))
+                sql += ' ORDER BY rowid ASC LIMIT ?'
+                args.append(max(1, min(int(limit or 200), 500)))
+                rows = db.execute(sql, args).fetchall()
+                return self._read_messages(db, rows[::-1])
         if not after:
             return self.messages(chat_id=chat_id, limit=limit)
         sql = 'SELECT payload FROM events WHERE ts >= ?'
@@ -385,13 +440,7 @@ class MessageArchive:
         args.append(max(1, min(int(limit or 200), 500)))
         with self._lock, _db(self.path) as db:
             rows = db.execute(sql, args).fetchall()
-        out = []
-        for (payload,) in rows:
-            try:
-                out.append(json.loads(payload))
-            except (ValueError, TypeError):
-                continue
-        return out
+            return self._read_messages(db, rows)
 
     def members(self, chat_id='', limit=3000):
         """这个群里**出现过的人**：名字 + 用户名（按发言多少排）
@@ -463,23 +512,33 @@ class MessageArchive:
             #   算进去的话，群里聊 100 句、机器人回 50 句，未读显示 150，
             #   完全看不出到底有多少条是真的没看
             rows = db.execute(
-                "SELECT chat_id, ts FROM events"
+                "SELECT chat_id, ts, rowid FROM events"
                 " WHERE COALESCE(json_extract(payload,'$.is_bot'),0) != 1"
             ).fetchall()
-        for chat_id, ts in rows:
-            if ts > (seen.get(chat_id) or ''):
+            newest_seq = db.execute('SELECT MAX(rowid) FROM events').fetchone()[0] or 0
+        for chat_id, ts, seq in rows:
+            mark = seen.get(chat_id) or ''
+            if isinstance(mark, dict):
+                try:
+                    cursor = int(mark.get('seq', 0))
+                except (ValueError, TypeError):
+                    cursor = 0
+                unread = seq > (cursor if cursor <= newest_seq else 0)
+            else:
+                unread = ts > str(mark)
+            if unread:
                 out[chat_id] = out.get(chat_id, 0) + 1
         return out
 
-    def baseline(self):
+    def baseline(self, with_seq=False):
         """每个会话「到现在为止」的时间点 —— 第一次打开页面时当已读基线用
 
         不这么做的话，一进来所有历史记录全顶着红点，真正的新消息反而看不出来。
         """
         with self._lock, _db(self.path) as db:
             rows = db.execute(
-                'SELECT chat_id, MAX(ts) FROM events GROUP BY chat_id').fetchall()
-        return {r[0]: (r[1] or '') for r in rows}
+                'SELECT chat_id, MAX(ts), MAX(rowid) FROM events GROUP BY chat_id').fetchall()
+        return {r[0]: ({'ts': r[1] or '', 'seq': r[2]} if with_seq else r[1] or '') for r in rows}
 
     def newest_ts(self):
         """目前库里最新一条的时间（页面开轮询时的起点）"""
@@ -534,10 +593,13 @@ class MessageArchive:
         #   表现成「图片永远显示下载中」。踩过。
         #   这里跟 TgAPI 保持一致：用 requests 默认设置（自动读系统代理）。
         sess = requests.Session()
+        next_prune = 0
         while not self.stopped.is_set():
             self.wake.clear()
             try:
-                self.prune()
+                if time.monotonic() >= next_prune:
+                    self.prune()
+                    next_prune = time.monotonic()+60
                 # 只挑「还没下到图」的 —— 不然最新的 30 条都有图时，
                 # 更早那些没下来的永远轮不到
                 with self._lock, _db(self.path) as db:
@@ -601,12 +663,13 @@ class MessageArchive:
         name = '%s_%s_%s%s' % (int(chat_id), int(message_id), version, suffix)
         self.media.mkdir(parents=True, exist_ok=True)
         with self._lock, _db(self.path) as db:
+            db.execute('BEGIN IMMEDIATE')
             row = db.execute('SELECT payload FROM events'
                              ' WHERE chat_id=? AND message_id=? AND file_id=?',
                              (chat_id, message_id, file_id)).fetchone()
             if not row:
                 return            # 记录已经被清了，图就别存了
-            (self.media / name).write_bytes(bytes(data))
+            (self.media / name).write_bytes(data)
             event = json.loads(row[0])
             event['media'] = name
             db.execute('UPDATE events SET payload=?'

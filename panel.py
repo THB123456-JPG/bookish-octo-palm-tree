@@ -21,20 +21,21 @@
 ★ 加新机器人类型的接口：在上面那张路由表加几行 → 实现写到它自己的 api.py
 """
 import json
+import copy
 import os
 import threading
 import time
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
+from urllib.error import HTTPError
 
 import core
 import login_log
-from runners.shop import store as SS
 import totp
 from core import log, resource_path
 from manager import DURATIONS, RUNNERS, type_name
-from merchants import make_token, safe_eq, pass_ok
+from merchants import make_token, safe_eq
 
 PAGE_FILE = 'panel_page.html'
 MESSAGES_FILE = 'messages_page.html'
@@ -516,7 +517,7 @@ class PanelHandler(BaseHTTPRequestHandler):
         ★ 没开过记录 / 一条消息都没收到 → 文件不存在 → 返回 None，
           面板显示「还没有记录」，不是报错
         """
-        p = os.path.join(core.DATA_DIR, '%s.archive.sqlite3' % bid)
+        p = os.path.join(core.bot_data_dir(self.mgr.find(bid)), '%s.archive.sqlite3' % bid)
         if not os.path.exists(p):
             return None
         try:
@@ -536,10 +537,41 @@ class PanelHandler(BaseHTTPRequestHandler):
         if (b.get('type') or '') != 'shop':
             self._json({'ok': False, 'error': '这不是商城机器人'}, 404)
             return None
+        from runners.shop import store as SS
         st = SS.store_for(self.mgr, bid)
         if st is None:
             self._json({'ok': False, 'error': '找不到这个机器人'}, 404)
         return st
+
+    def _shop_instance(self, path, me, method):
+        parts = path.strip('/').split('/')
+        if len(parts)<4:
+            return False
+        bot = self._bot_of(me, parts[2])
+        if bot is None:
+            return True
+        if bot.get('type') != 'shop':
+            self._json({'ok':False,'error':'这不是商城机器人'},404)
+            return True
+        if os.environ.get('PANEL_INSTANCE_CHILD') == '1':
+            return False
+        if not bot.get('instance_folder'):
+            return False
+        runner = self.mgr.runners.get(bot['id'])
+        if not runner or not runner.is_alive():
+            return False
+        body = self._body() if method=='POST' else {}
+        try:
+            try:
+                response = runner.request('/instance/panel', dict(path=self.path,method=method,
+                    principal={k:me.get(k) for k in ('role','mid','user','must_change')},body=body))
+            except HTTPError as error:
+                response = error
+            with response:
+                self._json(json.load(response), response.status)
+        except (OSError,ValueError):
+            self._json({'ok':False,'error':'机器人实例暂不可用'},503)
+        return True
 
     def _body(self):
         # ★ 标记「这次请求的 body 已经读掉了」——
@@ -775,15 +807,14 @@ class PanelHandler(BaseHTTPRequestHandler):
             # 一次性完成「勾上的划给他 + 原来属于他但没勾的收回」
             bids = b.get('bids') or []
             clear = b.get('clear_secrets', True)
-            moved, taken, cleared = self.mgr.assign_bots(mid, bids, clear)
+            try:
+                moved, taken, cleared = self.mgr.assign_bots(mid, bids, clear)
+            except OSError:
+                self._json({'ok':False,'error':'部分服务器未确认分配结果，请刷新后核对；未迁移机器人'},503)
+                return
             # ★ 收款地址被清掉了，扫描基线必须重建，
             #   否则新地址历史上的转账会被当成新收款，白送能量出去
-            for bid in cleared:
-                st = SS.store_for(self.mgr, bid)
-                if st is not None:
-                    st.data['scan'] = {'baseline': False, 'seen': [],
-                                       'last_ts': 0}
-                    st.save()
+            self.mgr.reset_shop_scans(cleared)
             self._json({'ok': True, 'moved': moved, 'taken': taken,
                         'cleared': len(cleared)})
             return
@@ -793,6 +824,20 @@ class PanelHandler(BaseHTTPRequestHandler):
     # -------- GET --------
     def do_GET(self):
         path = urlparse(self.path).path
+        if path.startswith('/api/nodes'):
+            me = self._gate()
+            if me is not None:
+                import nodes
+                nodes.handle(self,path,'GET',me)
+            return
+        if any(b.get('node_id') for b in getattr(self.mgr,'bots',[])):
+            import nodes
+            if nodes.proxy(self,path,'GET',None):
+                return
+        if path.startswith('/miniapp/'):
+            import miniapp
+            if miniapp.handle_get(self, path):
+                return
         # 管理后台和商户后台是同一个页面文件，角色由登录结果决定
         if path in ('/', '/index.html', '/m', '/m/'):
             # ★ 这次请求算不算「商户入口」？
@@ -837,6 +882,35 @@ class PanelHandler(BaseHTTPRequestHandler):
             # 图标基本不变，可以让浏览器存一天（省流量，手机上也快）
             self._send(200, body, ctype, cache='public, max-age=86400')
             return
+        if path == '/api/appearance':
+            me = self._gate()
+            if me is None or not self._admin_only(me):
+                return
+            import miniapp
+            self._json({'ok': True, 'footer_text': self.mgr.cfg.get('miniapp_footer_text', miniapp.DEFAULT_FOOTER)})
+            return
+
+        if path == '/api/server':
+            me = self._gate()
+            if me is None or not self._admin_only(me):
+                return
+            nid = (parse_qs(urlparse(self.path).query).get('node') or [''])[0]
+            if nid:
+                import nodes
+                registry = nodes.for_manager(self.mgr)
+                try:
+                    registry.get(nid)
+                    state = registry.cache.get(nid,{})
+                    value = copy.deepcopy(state.get('server') or {'ready':False,'reason':'运行服务器未连接'})
+                    value['stale'] = bool(not state.get('online') or time.time()-state.get('updated_at',0)>45 or value.get('stale'))
+                except OSError:
+                    value = {'ready':False,'reason':'运行服务器未配置'}
+            else:
+                monitor = getattr(self.mgr, 'server_monitor', None)
+                value = monitor.snapshot() if monitor else {'ready':False,'reason':'监控尚未启动，请检查主服务'}
+            self._json({'ok': True, 'server':value})
+            return
+
         if path == '/api/bots':
             me = self._gate()
             if me is None:
@@ -963,13 +1037,13 @@ class PanelHandler(BaseHTTPRequestHandler):
             try:
                 import io as _io
                 import solo_pack
-                miss = solo_pack.missing_sources()
+                miss = solo_pack.missing_sources(b)
                 if miss:
                     raise RuntimeError('缺少源文件：%s' % ', '.join(miss))
                 buf = _io.BytesIO()
                 solo_pack.make_zip(buf, solo_pack.client_config(
                     bid, b.get('token'), url, b.get('note'),
-                    b.get('bind_code')))
+                    b.get('bind_code'), bot=b, settings=self.mgr.cfg), bot=b)
                 data = buf.getvalue()
             except Exception as e:
                 log('生成客户安装包失败 %s：%s' % (bid, e))
@@ -987,6 +1061,9 @@ class PanelHandler(BaseHTTPRequestHandler):
         #   所以改记账的接口，一个字都不会碰到商城的代码。
         #   见 runners/__init__.py 里的结构说明。
         if path.startswith('/api/shop/'):
+            me = self._gate()
+            if me is None or self._shop_instance(path,me,'GET'):
+                return
             from runners.shop import api as shop_api
             if shop_api.handle_get(self, path):
                 return
@@ -1001,6 +1078,10 @@ class PanelHandler(BaseHTTPRequestHandler):
     # -------- POST --------
     def do_POST(self):
         path = urlparse(self.path).path
+        if path.startswith('/api/miniapp/'):
+            import miniapp
+            if miniapp.handle_post(self, path):
+                return
 
         # 登录是唯一免鉴权的 POST
         if path == '/api/login':
@@ -1016,6 +1097,29 @@ class PanelHandler(BaseHTTPRequestHandler):
 
         me = self._gate()
         if me is None:
+            return
+        if path.startswith('/api/nodes'):
+            import nodes
+            nodes.handle(self,path,'POST',me)
+            return
+        if any(b.get('node_id') for b in getattr(self.mgr,'bots',[])):
+            import nodes
+            if nodes.proxy(self,path,'POST',me):
+                return
+
+        if path == '/api/appearance':
+            if not self._admin_only(me):
+                return
+            value = self._body().get('footer_text')
+            if not isinstance(value, str) or len(value.encode('utf-16-le', errors='surrogatepass')) > 128 or '\n' in value or '\r' in value:
+                self._json({'ok': False, 'error': '请填写64字以内的单行文字'}, 400)
+                return
+            value = value.strip()
+            with self.mgr.lock:
+                updated = dict(self.mgr.cfg, miniapp_footer_text=value)
+                core.save_json(core.CONFIG_FILE, updated)
+                self.mgr.cfg['miniapp_footer_text'] = value
+            self._json({'ok': True, 'footer_text': value})
             return
 
         # 改自己的密码
@@ -1038,7 +1142,7 @@ class PanelHandler(BaseHTTPRequestHandler):
             bot, err = self.mgr.add(b.get('note', ''), b.get('token', ''),
                                     b.get('type') or 'kefu',
                                     b.get('duration') or 'forever',
-                                    remote=bool(b.get('remote')))
+                                    remote=bool(b.get('remote')),node_id=b.get('node_id'))
             if err:
                 self._json({'ok': False, 'error': err})
             else:
@@ -1048,13 +1152,16 @@ class PanelHandler(BaseHTTPRequestHandler):
                     'type_name': type_name(bot.get('type')),
                     'username': bot['username'], 'bind_code': bot['bind_code'],
                     'duration': bot.get('duration'),
-                    'remote': bool(bot.get('remote'))}})
+                    'remote': bool(bot.get('remote')),
+                    'node_id':bot.get('node_id',''),'pending':bool(bot.get('node_pending'))}})
             return
 
 
         # ---- 各机器人类型的接口（实现见 runners/<类型>/api.py）----
         #   路径前缀互不重叠，所以放在这里和原来分散在各处是等价的
         if path.startswith('/api/shop/'):
+            if self._shop_instance(path,me,'POST'):
+                return
             from runners.shop import api as shop_api
             if shop_api.handle_post(self, path, me):
                 return
@@ -1148,7 +1255,8 @@ class PanelHandler(BaseHTTPRequestHandler):
         if len(parts) == 4 and parts[0] == 'api' and parts[1] == 'bots':
             bid, action = parts[2], parts[3]
             # 归属校验：不是自己的机器人，回的话跟「找不到」一样
-            if self._bot_of(me, bid) is None:
+            bot = self._bot_of(me, bid)
+            if bot is None:
                 return
             # 商户对自己人也只能做表里登记过的 action
             if (not MERCHANT_ACTIONS.get(action, False)
@@ -1166,7 +1274,19 @@ class PanelHandler(BaseHTTPRequestHandler):
             elif action == 'unbind':
                 self.mgr.unbind(bid)
             elif action == 'delete':
-                self.mgr.remove(bid)
+                good, err = self.mgr.remove(bid)
+                if not good:
+                    self._json({'ok': False, 'error': err})
+                    return
+            elif action == 'restart':
+                if not self.mgr.should_run(bot):
+                    self._json({'ok': False, 'error': '机器人已停用或到期，请先启用或续期'})
+                    return
+                try:
+                    self.mgr.restart_bot(bid)
+                except (ValueError, OSError) as exc:
+                    self._json({'ok': False, 'error': str(exc)})
+                    return
             elif action == 'extend':
                 d = (self._body() or {}).get('duration') or 'forever'
                 ok2, err = self.mgr.extend(bid, d)

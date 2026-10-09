@@ -15,6 +15,8 @@
 import os
 import re
 import secrets
+import sqlite3
+from contextlib import closing
 import threading
 import time
 from datetime import datetime
@@ -65,11 +67,11 @@ class LedgerRunner(BaseRunner):
     # ================= 数据 =================
     @property
     def db_path(self):
-        return os.path.join(core.DATA_DIR, '%s.sqlite3' % self.bid)
+        return os.path.join(core.bot_data_dir(self.bot), '%s.sqlite3' % self.bid)
 
     @property
     def pos_path(self):
-        return os.path.join(core.DATA_DIR, '%s.positions.sqlite3' % self.bid)
+        return os.path.join(core.bot_data_dir(self.bot), '%s.positions.sqlite3' % self.bid)
 
     @property
     def store(self):
@@ -115,12 +117,15 @@ class LedgerRunner(BaseRunner):
 
     # ================= 生命周期 =================
     def on_start(self):
+        self.customer.sync()
         log('[%s] 记账机器人启动（数据 data/%s.sqlite3）' % (self.note(), self.bid))
 
     def tick_interval(self):
         return 60.0
 
     def on_tick(self):
+        self.customer.sync()
+        self.customer.tick()
         # 顺手更新给面板看的快照
         try:
             self._group_count = len(self.store.list_active_bot_groups())
@@ -155,16 +160,37 @@ class LedgerRunner(BaseRunner):
             log('[%s] 起扫链线程失败：%s' % (self.note(), e))
 
     # ================= 权限 =================
+    def admins(self):
+        import customer_config as CC
+        ids = ({CC.owner(self.bot)} | {int(i) for i in self.bot.get('admin_ids') or []} |
+               {int(i) for i in (self.bot.get('ledger') or {}).get('staff_grants', {})})
+        return {i for i in ids if i and CC.grants(self.bot, i)['global_ops']}
+
+    @property
+    def customer(self):
+        if not hasattr(self, '_customer'):
+            from .customer_runtime import CustomerRuntime
+            self._customer = CustomerRuntime(self)
+        return self._customer
+
+    def can_broadcast(self, uid):
+        import customer_config as CC
+        return CC.grants(self.bot, uid)['broadcast']
+
+    def can_configure(self, uid):
+        import customer_config as CC
+        return CC.grants(self.bot, uid)['manage']
+
+    def cmd_admin(self, aid, user, text):
+        if self.owner_id() and aid != self.owner_id():
+            self.send(aid, '机器人已激活，请由拥有者在内部人员中授权。')
+            return
+        super().cmd_admin(aid, user, text)
+
     def ledger_owners(self, chat_id):
-        """谁能管这个群：面板绑定的管理员 + 群里拉机器人进来的那个人"""
-        ids = set(int(x) for x in self.admins())
-        try:
-            oid = self.store.get_chat_owner_id(chat_id)
-            if oid:
-                ids.add(int(oid))
-        except Exception:
-            pass
-        return ids
+        """群主人身份必须来自机器人授权，拉入机器人本身不授予权限。"""
+        self.customer.sync()
+        return self.admins()
 
     def can_manage(self, chat_id, uid):
         """能管这个群吗：主人 / 面板管理员 / 已授权的操作员"""
@@ -173,9 +199,6 @@ class LedgerRunner(BaseRunner):
         if int(uid) in self.admins():
             return True
         try:
-            oid = self.store.get_chat_owner_id(chat_id)
-            if oid and int(uid) == int(oid):
-                return True
             return bool(self.store.is_operator(int(chat_id), int(uid),
                                                self.ledger_owners(chat_id)))
         except Exception:
@@ -250,25 +273,23 @@ class LedgerRunner(BaseRunner):
 
         title = chat.get('title') or str(chat_id)
         try:
+            self.customer.new_group(int(chat_id))
             self.store.remember_bot_chat(int(chat_id), title, chat.get('type') or '')
             self.store.ensure_chat(int(chat_id))
-            # 谁拉的机器人，谁就是这个群的主人（原版就是这个规矩）
-            if frm.get('id'):
+            if frm.get('id') and int(frm['id']) in self.admins():
                 self.store.set_chat_owner(int(chat_id), int(frm['id']))
         except Exception as e:
             log('[%s] 记录新群失败：%s' % (self.note(), e))
 
         log('[%s] 被拉进群「%s」(%s)，拉的人 %s'
             % (self.note(), title, chat_id, frm.get('id')))
-        self.send_html(chat_id, self.welcome_text(),
-                       kb={'inline_keyboard': [[
-                           {'text': '使用说明', 'callback_data': 'ledger:help'}]]})
+        self.send_html(chat_id, self.welcome_text())
 
     # ================= 新成员进群的欢迎语 =================
     # ★★ 主人私聊发「设置欢迎语」→ 机器人问「请输入…」→ 他发内容 → 存下来。
     #    新成员进群时就用这条欢迎。
     # ★★ 跟「机器人被拉进群」那个欢迎语**不是一回事**（那个在面板里配）：
-    #    · 机器人被拉进群 → welcome_text()（面板配，默认 🎉 群记账机器人已加入本群…）
+    #    · 机器人被拉进群 → welcome_text()（固定简短就绪提示）
     #    · 新成员进群     → newbie_welcome()（下面这套，主人用命令配）
     #    2026-10-08 用户要的是后者（原来那句是**写死**的 💐欢迎XXX加入该群~）。
     WELCOME_INPUT_TTL = 600      # 等他发内容最多等 10 分钟
@@ -318,6 +339,20 @@ class LedgerRunner(BaseRunner):
         return str((best or {}).get('file_id') or '')
 
     def _welcome_line(self, member, tg_link=True):
+        import customer_config as CC
+        if (self.bot.get('ledger') or {}).get('customer', {}).get('basics'):
+            b = CC.settings(self.bot)['basics']
+            if not b['welcome_enabled']:
+                return ''
+            actor = self.actor_of(member)
+            label = C.escape(actor.display_name)
+            if b['welcome_nickname'] and actor.username:
+                label += ' (@%s)' % C.escape(actor.username)
+            line = C.escape(b['welcome_text']).replace('{name}', label)
+            if b['welcome_mention']:
+                mention = G.member_mention_html(member, tg_link=tg_link)
+                line = mention + '\n' + line
+            return line
         """把欢迎语里的 {name} 换成成员的可点击名字。返回空串 = 不欢迎
 
         ★ tg_link=False 用在**图片说明**里（见 group_admin.member_mention_html）
@@ -345,7 +380,7 @@ class LedgerRunner(BaseRunner):
         if not actor:
             return True
         uid = actor.user_id
-        if int(uid) not in self.admins():
+        if not self.can_configure(uid):
             self.send_html(uid, '只有机器人主人可以设置欢迎语。')
             return True
         self._wel[uid] = time.time()
@@ -396,6 +431,10 @@ class LedgerRunner(BaseRunner):
         at = self._wel.get(uid)
         if not at:
             return False
+        if not self.can_configure(uid):
+            self._wel.pop(uid, None)
+            self.send_html(uid, '管理权限已撤销。')
+            return True
         if time.time() - at > self.WELCOME_INPUT_TTL:
             # ★ 过期了**不吃**，放行走正常流程 —— 别把人家的记账吞了
             self._wel.pop(uid, None)
@@ -419,6 +458,7 @@ class LedgerRunner(BaseRunner):
         #   更不能当成「内容是空的」报错（图片消息本来就没有文字）
         if photo and not body:
             led['newbie_welcome_photo'] = photo
+            __import__('customer_config').sync_welcome(self.bot)
             self.mgr.save()
             self.send_html(uid, '✅ 换好欢迎图了。新成员进群会看到：')
             self._welcome_preview(uid, actor)
@@ -430,6 +470,7 @@ class LedgerRunner(BaseRunner):
             return True
         if body in ('删除图片', '删除欢迎图', '删图', '去掉图片', '不要图片'):
             if led.pop('newbie_welcome_photo', None):
+                __import__('customer_config').sync_welcome(self.bot)
                 self.mgr.save()
                 self.send_html(uid, '✅ 欢迎图删了，新成员进群只发文字。')
             else:
@@ -437,6 +478,7 @@ class LedgerRunner(BaseRunner):
             return True
         if body in ('默认', '/默认', '恢复默认'):
             led.pop('newbie_welcome', None)
+            __import__('customer_config').sync_welcome(self.bot)
             self.mgr.save()
             self.send_html(uid, '✅ 文字已恢复成默认：\n\n<code>%s</code>%s'
                             % (C.escape(G.DEFAULT_NEWBIE_WELCOME),
@@ -448,6 +490,7 @@ class LedgerRunner(BaseRunner):
             #   要是只清文字留住图，就变成「关了但还有张图赖在那」的怪状态
             led['newbie_welcome'] = ''
             led.pop('newbie_welcome_photo', None)
+            __import__('customer_config').sync_welcome(self.bot)
             self.mgr.save()
             self.send_html(uid, '✅ 已关闭，以后新成员进群不再发欢迎语。\n'
                                 '（想开回来就再发一次「设置欢迎语」）')
@@ -462,6 +505,7 @@ class LedgerRunner(BaseRunner):
         if photo:
             led['newbie_welcome_photo'] = photo
         led['newbie_welcome'] = body
+        __import__('customer_config').sync_welcome(self.bot)
         self.mgr.save()
         self.send_html(uid, '✅ 设置好了。新成员进群时，群里会看到：')
         self._welcome_preview(uid, actor)
@@ -469,13 +513,8 @@ class LedgerRunner(BaseRunner):
         return True
 
     def welcome_text(self):
-        """机器人**自己被拉进群**时的欢迎语。面板没填就用默认的"""
-        cfg = self.bot.get('ledger') or {}
-        text = (cfg.get('welcome_text') or '').strip()
-        if not text or text == G.DEFAULT_WELCOME.strip():
-            return G.DEFAULT_WELCOME
-        # 面板里填的换行可能是字面 \n，转回真换行
-        return text.replace('\\n', '\n')
+        """机器人自己入群统一显示简短提示；成员欢迎语独立配置。"""
+        return C.GROUP_READY_TEXT
 
     def handle_any(self, msg):
         chat = msg.get('chat') or {}
@@ -534,6 +573,11 @@ class LedgerRunner(BaseRunner):
 
         if chat.get('type') not in ('group', 'supergroup'):
             return False
+        import customer_config as CC
+        self.customer.new_group(int(chat_id))
+        if msg.get('new_chat_title') and CC.feature(self.bot, 'title_notice'):
+            self.customer.notify(chat_id, '群名变更：' + C.escape(msg['new_chat_title']))
+            self.store.remember_bot_chat(int(chat_id), msg['new_chat_title'], chat['type'])
 
         # 新人进群 → 欢迎
         newbies = msg.get('new_chat_members') or []
@@ -542,11 +586,9 @@ class LedgerRunner(BaseRunner):
             humans = []
             for m in newbies:
                 if int(m.get('id') or 0) == int(my_id or 0):
-                    if frm.get('id'):
-                        try:
-                            self.store.set_chat_owner(int(chat_id), int(frm['id']))
-                        except Exception:
-                            pass
+                    self.on_my_chat_member({'chat': chat, 'from': frm,
+                        'old_chat_member': {'status': 'left'},
+                        'new_chat_member': {'status': 'member'}})
                     continue
                 if G.is_human_member(m, my_id):
                     humans.append(m)
@@ -554,6 +596,8 @@ class LedgerRunner(BaseRunner):
             #   同时进好几个人就退回一条纯文字：一次刷好几张图太吵，
             #   而且图的说明只有 1024 字，塞不下几行欢迎语。
             photo = self.newbie_welcome_photo() if len(humans) == 1 else ''
+            if humans and CC.feature(self.bot, 'join_notice'):
+                self.customer.notify(chat_id, '群 %s 新成员：%s' % (chat_id, ', '.join(C.escape((self.actor_of(m)).display_name) for m in humans)))
             lines = []
             for m in humans:
                 # ★ 走主人配的欢迎语（没配就是默认那句）。返回空串 = 被关了。
@@ -571,9 +615,9 @@ class LedgerRunner(BaseRunner):
         # 有人退群 → 送别
         left = msg.get('left_chat_member')
         if left:
-            if G.is_human_member(left, (self.me or {}).get('id')):
-                self.send_html(chat_id, '%s离开了本群，聚是满天星，散是一团火~'
-                               % G.member_mention_html(left))
+            b = CC.settings(self.bot)['basics']
+            if b['leave_enabled'] and b['leave_text'] and G.is_human_member(left, (self.me or {}).get('id')):
+                self.send_html(chat_id, C.escape(b['leave_text']).replace('{name}', G.member_mention_html(left)))
             return True
         return False
 
@@ -581,6 +625,20 @@ class LedgerRunner(BaseRunner):
         st = self.store
         actor = self.actor_of(frm)
         is_group = chat.get('type') in ('group', 'supergroup')
+        import customer_config as CC
+        cfg = self.customer.sync()
+        if is_group:
+            self.customer.new_group(int(chat_id))
+            if actor and actor.user_id in self.admins():
+                st.set_chat_owner(int(chat_id), actor.user_id,
+                                  replace=st.get_chat_owner_id(int(chat_id)) not in self.admins())
+            self.customer.metadata(int(chat_id), chat, actor)
+            self.customer.sync()
+        if is_group and actor and self.customer.address_command(int(chat_id), actor, text):
+            return
+        if is_group and text.lower() == '/start@' + str(
+                (self.me or {}).get('username') or self.bot.get('username') or '').lower():
+            text = '/start'
 
         # ① 先把这个群和这个人记下来（广播、@全体、操作员都要用）
         try:
@@ -626,6 +684,13 @@ class LedgerRunner(BaseRunner):
             if self.welcome_command(actor, msg, cmd):
                 return
 
+        if text.strip() == '/统计':
+            if is_group:
+                self.send_html(chat_id, '请由机器人拥有者私聊发送 /统计。', reply_to=msg.get('message_id'))
+            else:
+                self.start_mine(actor, msg, all_members=True)
+            return
+
         # ③.5 「/我」—— 自己的加账明细（只算**他自己**记的账）
         #      群里：直接统计本群
         #      私聊：先弹群列表勾选（可多选/全选），再统计
@@ -645,10 +710,16 @@ class LedgerRunner(BaseRunner):
         addr = trc20.extract_trc20_address(text)
         if addr:
             if is_group:
+                if not cfg['features']['tron_verify']:
+                    return
                 # 群里：防篡改核对图。★ **一个字都不能变** ——
                 #   那是客户拿来核对收款地址的，跟查余额是两回事。
                 trc20.reply_trc20_verify_image(self.api, chat_id, addr,
                                                reply_to=msg.get('message_id'))
+                if cfg['features']['admin_confirm']:
+                    self.send_html(chat_id, '<code>%s</code>' % addr, kb={'inline_keyboard': [[{'text':'群管理员确认地址','callback_data':'lc:verify:'+addr}]]})
+                if cfg['features']['tron_balance'] or cfg['features']['tron_details'] or cfg['features']['tron_count']:
+                    self.tronw.send_card(chat_id, addr)
             elif not tc.address_valid(addr):
                 # 私聊里发错一位就别去查了 —— 查回来「未激活」会把人吓一跳
                 self.send_html(chat_id, '❌ 这不是有效的 TRC20 地址'
@@ -669,7 +740,8 @@ class LedgerRunner(BaseRunner):
             self.set_realtime_rate(chat_id, actor, msg, st)
             return
         if price.is_price_command(text):
-            self.reply_price(chat_id, msg)
+            if cfg['features']['okx']:
+                self.reply_price(chat_id, msg)
             return
         # ★ `G` 查贵金属（用户 2026-10-08 要的，跟 `z0` 查 U 价并排）
         #   放在算式**之前** —— `G` 不是合法算式、也进不了记账，
@@ -684,7 +756,9 @@ class LedgerRunner(BaseRunner):
         #   所以不会跟记账、算式、币价这些抢活
         hit = lookup.detect(text)
         if hit:
-            self.reply_lookup(chat_id, msg, hit[0], hit[1])
+            key = {'phone':'phone', 'id':'idcard', 'idcard':'idcard', 'bank':'bank', 'bankcard':'bank'}.get(hit[0], hit[0])
+            if cfg['features']['lookup'] and cfg['features'].get(key, False):
+                self.reply_lookup(chat_id, msg, hit[0], hit[1])
             return
 
         # ⑥ 算式 → 直接算
@@ -701,23 +775,51 @@ class LedgerRunner(BaseRunner):
 
         # ⑦ 记账主逻辑
         reply = msg.get('reply_to_message') or {}
-        result = C.handle_text(
-            store=st,
-            chat_id=int(chat_id),
-            actor=actor,
-            text=text,
-            owner_ids=self.ledger_owners(chat_id),
-            reply_user=self.actor_of(reply.get('from')) if reply else None,
-            reply_text=((reply.get('text') or reply.get('caption'))
-                        if reply else None),
-            message_id=msg.get('message_id'),
-            reply_message_id=reply.get('message_id') if reply else None,
-        )
+        if is_group and actor:
+            explicit = str(actor.user_id) in (self.bot.get('ledger') or {}).get('staff_grants', {})
+            if explicit and not self.can_manage(int(chat_id), actor.user_id):
+                try:
+                    entry_text = C._parse_entry(text) is not None or text.startswith('分红')
+                except ValueError:
+                    entry_text = True
+                if entry_text or text in ('撤销', '清空', '/clear', '/undo') or text.startswith('设置'):
+                    self.send_html(chat_id, '你没有这个群的操作权限。')
+                    return
+            edit_text = text
+            if cfg['features']['pure_u']:
+                if text.startswith(('下发','/下发','/out','/payout','出款','下分')) or re.match(r'\S+/?下发-?\d', text):
+                    return
+                if text.startswith('分红'):
+                    edit_text = '下发' + text[2:]
+            if self.customer.edit(int(chat_id), actor, edit_text, msg):
+                return
+        from contextlib import nullcontext
+        with getattr(self.mgr, 'lock', nullcontext()):
+            self.customer.sync()
+            result = C.handle_text(
+                store=st,
+                chat_id=int(chat_id),
+                actor=actor,
+                text=text,
+                owner_ids=self.ledger_owners(chat_id),
+                reply_user=self.actor_of(reply.get('from')) if reply else None,
+                reply_text=((reply.get('text') or reply.get('caption'))
+                            if reply else None),
+                message_id=msg.get('message_id'),
+                reply_message_id=reply.get('message_id') if reply else None,
+            )
         if result and result.text:
             kb = (self.bill_keyboard(chat_id)
                   if self._looks_like_bill(result.text) else None)
             self.send_html(chat_id, result.text, kb=kb,
-                           reply_to=msg.get('message_id'))
+                           reply_to=None if kb else msg.get('message_id'))
+            if result.changed and is_group:
+                self.customer.deposit(int(chat_id))
+            archive = getattr(st, 'last_customer_archive', None)
+            if archive and '已清空' in result.text:
+                self.send_html(chat_id, '已保存清空前的完整账单。', kb={'inline_keyboard': [[{'text':'查看完整账单存档','callback_data':'lc:archive:'+str(archive)}]]})
+        elif result is None and is_group:
+            self.customer.reply(int(chat_id), text, msg.get('message_id'))
 
     @staticmethod
     def _looks_like_bill(text):
@@ -784,7 +886,7 @@ class LedgerRunner(BaseRunner):
         if not actor:
             return True
         uid = actor.user_id
-        if int(uid) not in self.admins():
+        if not self.is_owner(uid):
             self.send_html(uid, '只有机器人主人可以设置查询密钥。')
             return True
 
@@ -976,7 +1078,7 @@ class LedgerRunner(BaseRunner):
         if not actor:
             return True
         uid = actor.user_id
-        if int(uid) not in self.admins():
+        if not self.is_owner(uid):
             self.send_html(uid, '只有机器人主人可以设置查询密钥。')
             return True
 
@@ -984,10 +1086,11 @@ class LedgerRunner(BaseRunner):
         args = text.split(None, 1)[1].strip() if ' ' in text else ''
 
         if args in ('', '列表', 'list') or text.startswith('密钥列表'):
-            got = self.tronw.keys()
+            got = self.tronw.custom_keys()
             if not got:
-                self.send_html(uid, '现在<b>没有</b>配置查询密钥，用的是公共接口'
-                                    '（额度低、容易限流）。\n\n' + self._key_help())
+                self.send_html(uid, '尚未绑定自己的查询密钥。'
+                                    + ('当前使用平台默认密钥轮换查询。' if self.tronw.keys() else '当前使用公共接口。')
+                                    + '\n\n' + self._key_help())
             else:
                 masked = '\n'.join('  %d. …%s' % (i + 1, k[-4:])
                                    for i, k in enumerate(got))
@@ -1008,7 +1111,7 @@ class LedgerRunner(BaseRunner):
             self.send_html(uid, self._key_help())
             return True
 
-        got = list(self.tronw.keys())
+        got = list(self.tronw.custom_keys())
         if args in got:
             self.send_html(uid, '这一把已经在里面了（最后 4 位 …%s），没重复加。'
                             % args[-4:])
@@ -1104,13 +1207,15 @@ class LedgerRunner(BaseRunner):
         name = actor.display_name or actor.username or str(actor.user_id)
         return '%s @%s' % (name, actor.username) if actor.username else name
 
-    def start_mine(self, actor, msg):
-        """私聊发 /我 → 先选群（可多选、可全选）→ 统计所选群里自己的明细"""
+    def start_mine(self, actor, msg, *, all_members=False):
+        """私聊选群：/我 查看本人明细，拥有者 /统计 查看每个人合计。"""
         if not actor:
             return
         uid = actor.user_id
-        if not self.can_use_mine(uid):
-            self.send_html(uid, '只有机器人主人或操作员可以用「/我」。')
+        allowed = self.is_owner(uid) if all_members else self.can_use_mine(uid)
+        if not allowed:
+            self.send_html(uid, '只有机器人拥有者可以使用「/统计」。' if all_members else
+                               '只有机器人主人或操作员可以用「/我」。')
             return
         try:
             groups = [dict(r) for r in self.store.list_active_bot_groups()]
@@ -1122,8 +1227,10 @@ class LedgerRunner(BaseRunner):
                                 '先让机器人加入群，并在群里发一条消息。')
             return
         self._mine[uid] = {'groups': groups, 'selected': set(),
-                           'title': self.mine_title(actor), 'at': time.time()}
-        self.send_html(uid, self._mine_pick_text(0), kb=self._mine_kb(uid))
+                           'title': self.mine_title(actor), 'at': time.time(), 'all_members': all_members}
+        result = self.send_html(uid, self._mine_pick_text(0), kb=self._mine_kb(uid))
+        if all_members and isinstance(result, dict):
+            self._mine[uid]['message_id'] = result.get('message_id')
 
     @staticmethod
     def _mine_pick_text(n):
@@ -1132,28 +1239,37 @@ class LedgerRunner(BaseRunner):
 
     def _mine_kb(self, uid):
         st = self._mine.get(uid) or {}
+        prefix = 'stats' if st.get('all_members') else 'mine'
         kb = G.group_selection_keyboard(st.get('groups') or [],
-                                        st.get('selected') or set(), 'mine')
+                                        st.get('selected') or set(), prefix)
         # ★ 用户要「也可以全选」—— 广播那套键盘没有全选，这里补上。
         #   只加在「/我」这套上，**不动广播的界面**（那个是好的，别碰）。
         kb['inline_keyboard'].insert(-1, [
-            {'text': '全选', 'callback_data': 'mine:all'},
-            {'text': '清空', 'callback_data': 'mine:none'}])
+            {'text': '全选', 'callback_data': prefix + ':all'},
+            {'text': '清空', 'callback_data': prefix + ':none'}])
         return kb
 
-    def mine_callback(self, cb_id, uid, mid, data):
-        """「/我」的选群菜单。★ 逻辑跟 broadcast_callback 一个路子"""
-        if not self.can_use_mine(uid):
+    def mine_callback(self, cb_id, uid, mid, data, *, all_members=False):
+        """「/我」与拥有者「/统计」的选群菜单。"""
+        allowed = self.is_owner(uid) if all_members else self.can_use_mine(uid)
+        if not allowed:
             self._answer(cb_id, '无权限')
             return
+        st = self._mine.get(uid)
+        command = '/统计' if all_members else '/我'
+        if (st and bool(st.get('all_members')) != all_members) or (all_members and (
+                not st or st.get('message_id') != mid or time.time()-st['at'] > MENU_TTL)):
+            self._answer(cb_id, '菜单已失效，请重新发送「%s」' % command)
+            return
+        if all_members:
+            data = data.replace('stats:', 'mine:', 1)
         if data == 'mine:cancel':
             self._mine.pop(uid, None)
             self._answer(cb_id, '已取消')
             self.edit_html(uid, mid, '已取消。')
             return
-        st = self._mine.get(uid)
         if not st:
-            self._answer(cb_id, '菜单已失效，请重新发送「/我」')
+            self._answer(cb_id, '菜单已失效，请重新发送「%s」' % command)
             return
         if data in ('mine:all', 'mine:none'):
             st['at'] = time.time()
@@ -1168,6 +1284,9 @@ class LedgerRunner(BaseRunner):
                 cid = int(data.rsplit(':', 1)[1])
             except ValueError:
                 self._answer(cb_id, '')
+                return
+            if all_members and cid not in {int(g['chat_id']) for g in st['groups']}:
+                self._answer(cb_id, '该群不在当前列表')
                 return
             if cid in st['selected']:
                 st['selected'].discard(cid)
@@ -1189,12 +1308,18 @@ class LedgerRunner(BaseRunner):
             self._mine.pop(uid, None)
             self._answer(cb_id, '统计中…')
             try:
-                text = C.format_mine_multi(self.store, uid, picked, title)
+                text = C.format_owner_statistics(self.store, picked) if all_members else \
+                       C.format_mine_multi(self.store, uid, picked, title)
             except Exception as e:
-                log('[%s] 「/我」统计失败：%s' % (self.note(), e))
+                log('[%s] 「%s」统计失败：%s' % (self.note(), command, e))
                 self.send_html(uid, '统计失败，稍后再试。')
                 return
-            self.send_html(uid, text)
+            if all_members:
+                self.edit_html(uid, mid, '统计完成。', kb={'inline_keyboard': []})
+                for chunk in text_utils.split_html_message(text):
+                    self.send_html(uid, chunk)
+            else:
+                self.send_html(uid, text)
             return
 
     # ================= 群管理命令 =================
@@ -1497,7 +1622,7 @@ class LedgerRunner(BaseRunner):
             return
         uid = actor.user_id
         mid = msg.get('message_id')
-        if uid not in self.admins():
+        if not self.can_broadcast(uid):
             self.send_html(uid, '只有机器人主人可以广播。')
             return
         try:
@@ -1561,7 +1686,7 @@ class LedgerRunner(BaseRunner):
 
     def broadcast_callback(self, cb_id, uid, mid, data):
         st = self._bc.get(uid)
-        if uid not in self.admins():
+        if not self.can_broadcast(uid):
             self._answer(cb_id, '无权限')
             return
         if data == 'broadcast:cancel':
@@ -1648,8 +1773,12 @@ class LedgerRunner(BaseRunner):
         started = time.time()
         ok = fail = 0
         for cid in targets:
-            if self.stop_evt.is_set():
+            if self.stop_evt.is_set() or self.expired() or not self.can_broadcast(uid):
                 break
+            with closing(sqlite3.connect(self.db_path)) as db:
+                active = db.execute('SELECT 1 FROM bot_chats WHERE chat_id=? AND is_active=1', (cid,)).fetchone()
+            if not active:
+                continue
             try:
                 self.api.call('sendMessage', chat_id=cid, text=content)
                 ok += 1
@@ -1684,7 +1813,6 @@ class LedgerRunner(BaseRunner):
         with self._check_lock:
             start = self._check_idx % len(rows)
             self._check_idx = (start + GROUP_CHECK_PER_TICK) % max(len(rows), 1)
-        my_id = (self.me or {}).get('id')
         for row in rows[start:start + GROUP_CHECK_PER_TICK]:
             if self.stop_evt.is_set():
                 return
@@ -1710,28 +1838,30 @@ class LedgerRunner(BaseRunner):
                 except Exception:
                     pass
                 continue
-            if G.check_permission(self.api, cid, chat.get('type') or 'supergroup',
-                                  my_id) is False:
-                pass      # 没删消息权限不影响记账，只是不能清理，不注销
 
     # ================= 账单 =================
     def bill_keyboard(self, chat_id):
+        import customer_config as CC
         try:
             mode = self.store.get_ledger_view_mode(int(chat_id))
         except Exception:
             mode = 'detailed'
         other = 'compact' if mode == 'detailed' else 'detailed'
         label = '简洁' if mode == 'detailed' else '详细'
-        return {'inline_keyboard': [
+        keyboard = {'inline_keyboard': [
             [{'text': '今日', 'callback_data': 'ledger:today'},
              {'text': '昨日', 'callback_data': 'ledger:yesterday'}],
-            [{'text': '切换%s' % label,
+            [{'text': '↪️ 切换%s' % label,
               'callback_data': 'ledger:view:%s:today' % other}],
         ]}
+        if not CC.feature(self.bot, 'bill_switch'):
+            keyboard['inline_keyboard'] = keyboard['inline_keyboard'][:1]
+        return keyboard
 
     def send_bill(self, chat_id, scope='today'):
         """出账单（带按钮 + 长消息自动分块）"""
         st = self.store
+        self.customer.sync()
         try:
             mode = st.get_ledger_view_mode(int(chat_id))
         except Exception:
@@ -1748,9 +1878,11 @@ class LedgerRunner(BaseRunner):
         return True
 
     def on_callback(self, cq):
+        if self.customer.callback(cq):
+            return
         data = cq.get('data') or ''
         if not data.startswith(('ledger:', 'broadcast:', 'cleanup:',
-                                'mine:', tron_watch.PREFIX)):
+                                'mine:', 'stats:', tron_watch.PREFIX)):
             return
         cb_id = cq.get('id')
         frm = cq.get('from') or {}
@@ -1771,6 +1903,11 @@ class LedgerRunner(BaseRunner):
                 self.cleanup_callback(cb_id, uid, mid, data)
             elif data.startswith('mine:'):
                 self.mine_callback(cb_id, uid, mid, data)
+            elif data.startswith('stats:'):
+                if chat.get('type') != 'private' or chat_id != uid:
+                    self._answer(cb_id, '请在自己的私聊统计菜单操作')
+                else:
+                    self.mine_callback(cb_id, uid, mid, data, all_members=True)
             elif data.startswith(tron_watch.PREFIX):
                 self._answer(cb_id, '')
                 # ★ 按钮是**私聊**里的，chat_id 就是那个人的私聊
@@ -1780,6 +1917,8 @@ class LedgerRunner(BaseRunner):
                 self.send_html(chat_id or uid, C.HELP_TEXT)
             elif not chat_id:
                 self._answer(cb_id, '')
+            elif data.startswith('ledger:view:') and not self.can_manage(int(chat_id), uid):
+                self._answer(cb_id, '没有本群账单修改权限')
             else:
                 self._do_callback(cb_id, int(chat_id), mid, data)
         except TgError as e:
@@ -1791,11 +1930,16 @@ class LedgerRunner(BaseRunner):
 
     def _do_callback(self, cb_id, chat_id, mid, data):
         st = self.store
+        self.customer.sync()
         parts = data.split(':')
         scope = None
         if data in ('ledger:today', 'ledger:yesterday'):
             scope = 'today' if data.endswith('today') else 'yesterday'
         elif len(parts) == 4 and parts[1] == 'view':
+            import customer_config as CC
+            if not CC.feature(self.bot, 'bill_switch'):
+                self._answer(cb_id, '账单切换已关闭')
+                return
             mode, scope = parts[2], parts[3]
             if mode not in ('compact', 'detailed'):
                 self._answer(cb_id, '')
@@ -1831,12 +1975,19 @@ class LedgerRunner(BaseRunner):
     def send_photo_html(self, chat_id, photo, caption, kb=None):
         """发图，文字挂在图的**说明**上（caption）。
 
-        ★ 这里传的 photo 是 TG 的 **file_id**（主人自己发上来的那张），
-          不是本地文件 —— 所以不用上传、不用下载、不占空间。
+        ★ 历史图片使用 TG file_id，小程序上传的图片使用本地欢迎图。
         ★ 说明（caption）上限 **1024 字**，比普通消息的 4096 紧得多。
         ★ 说明里**不能用 tg://user 链接**（点了没反应）—— 调用方负责
           （见 _welcome_line 的 tg_link 参数）。
         """
+        from customer_images import LOCAL_PHOTO, image_path
+        if photo == LOCAL_PHOTO:
+            try:
+                with image_path(self.bot).open('rb') as image:
+                    return self.api.call_file('sendPhoto', 'photo', 'welcome.jpg', image,
+                                              chat_id=chat_id, parse_mode='HTML', caption=caption or '')
+            except (OSError, TgError):
+                return self.send_html(chat_id, caption or '')
         params = dict(chat_id=chat_id, photo=photo, parse_mode='HTML',
                       caption=caption or '')
         if kb:

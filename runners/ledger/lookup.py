@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import os
+import mmap
 import re
 import struct
 import threading
@@ -35,7 +36,7 @@ IDCODE_TXT = os.path.join(_ASSETS, 'idcode.txt')
 #   （前提：spec 的 datas 里要带上它们，少了就报「数据文件没找到」）
 
 _phone_lock = threading.Lock()
-_phone_buf: bytes | None = None
+_phone_buf: mmap.mmap | None = None
 _phone_count = 0
 _phone_first = 0
 
@@ -172,7 +173,7 @@ def id_checksum_ok(num: str) -> bool:
 
 # ------------------------------------------------------------------ 手机号
 def _load_phone_db():
-    """把 phone.dat 读进内存（只读一次）。
+    """只读映射 phone.dat，由系统按需缓存，不复制整库到每个进程。
 
     文件格式（ls0f/phone 定的）：
       头 8 字节  = 4 字节版本 + 4 字节「索引区起始偏移」
@@ -191,7 +192,7 @@ def _load_phone_db():
                 "手机号库没找到（%s）—— 服务器上重新部署一次，"
                 "打包 exe 的话要把它加进 spec 的 datas" % PHONE_DAT)
         with open(PHONE_DAT, "rb") as f:
-            buf = f.read()
+            buf = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
         rec = struct.calcsize("<iiB")
         _phone_first = struct.unpack("<4si", buf[:8])[1]
         _phone_count = (len(buf) - _phone_first) // rec

@@ -66,7 +66,7 @@ def format_okx_prices(prices: list[Decimal], source: str) -> str:
 def is_price_command(text: str) -> bool:
     normalized = text.strip()
     lowered = normalized.lower()
-    return normalized == "币价" or lowered in {"bj", "z0"} or normalized == "/price"
+    return normalized == "币价" or lowered in {"bj", "z0"}
 
 
 def is_realtime_rate_command(text: str) -> bool:

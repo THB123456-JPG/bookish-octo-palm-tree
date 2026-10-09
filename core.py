@@ -74,6 +74,13 @@ def set_base_dir(path):
 BOTS_FILE = os.path.join(BASE_DIR, 'bots.json')
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 
+
+def bot_data_dir(bot):
+    if bot and bot.get('instance_folder') and os.environ.get('PANEL_INSTANCE_CHILD') != '1':
+        from bot_instances import folder
+        return str(folder(bot) / 'data')
+    return DATA_DIR
+
 # 某个机器人**独有**的定制代码：codes/<机器人id>.py
 #   ★ 平时这个目录是空的 —— 没有这个文件 = 什么都没发生，跟以前一模一样。
 #     只有「这个客户要个别人没有的功能」时才建一个，**只影响那一个机器人**。
@@ -518,6 +525,7 @@ class BaseRunner(threading.Thread):
         self.api = TgAPI(bot['token'])
         self.stop_evt = threading.Event()
         self.offset = 0
+        self.received_updates = 0
         self.me = None
         self._next_tick = 0.0
         self._archive = None        # 群消息记录，懒加载（sqlite 不能跨线程）
@@ -525,7 +533,7 @@ class BaseRunner(threading.Thread):
         # 发出去的消息也归档（机器人收不到自己发的，只能自己记）
         self.api.on_sent = self.archive_sent
 
-        self.data_file = os.path.join(DATA_DIR, '%s.json' % self.bid)
+        self.data_file = os.path.join(bot_data_dir(bot), '%s.json' % self.bid)
         self.data = load_json(self.data_file, {})
         if not isinstance(self.data, dict):
             self.data = {}
@@ -719,6 +727,13 @@ class BaseRunner(threading.Thread):
         else:
             self.set_status('running')
             self.on_start()
+            try:
+                import customer_ui
+            except ImportError:
+                customer_ui = None
+            if customer_ui:
+                customer_ui.configure_menu(self)
+                customer_ui.configure_description(self)
             # 定制文件里的 on_start（可选）
             self.code_call('on_start', self)
             log('[%s] 已启动 @%s%s' % (self.note(), self.me.get('username'),
@@ -754,6 +769,7 @@ class BaseRunner(threading.Thread):
                     and self.bot.get('status') != 'running'):
                 self.set_status('running')
 
+            self.received_updates += len(updates or [])
             for u in updates or []:
                 self.offset = u['update_id'] + 1
                 # ★ 定制文件先过一遍：返回 True = 它自己处理完了，
@@ -871,7 +887,7 @@ class BaseRunner(threading.Thread):
         if self._archive is None and self.archive_cfg().get('enabled'):
             from archive import MessageArchive
             self._archive = MessageArchive(
-                os.path.join(DATA_DIR, '%s.archive.sqlite3' % self.bid),
+                os.path.join(bot_data_dir(self.bot), '%s.archive.sqlite3' % self.bid),
                 token=self.bot.get('token') or '',
                 owner_id=self.owner_id() or '')
             self._archive.start()
@@ -915,6 +931,10 @@ class BaseRunner(threading.Thread):
                 if msg.get(k):
                     msg[k] = html_to_text(msg[k])
             result = msg
+        if not result.get('reply_to_message'):
+            reply_id = (params.get('reply_parameters') or {}).get('message_id') or params.get('reply_to_message_id')
+            if reply_id:
+                result = dict(result, reply_to_message={'message_id': reply_id})
         self.record_archive({'message': result}, is_own=True)
 
     def close_archive(self):
@@ -980,6 +1000,13 @@ class BaseRunner(threading.Thread):
         #   放在最前面 = 群里每条消息都能留下，不管后面怎么分发；
         #   没开的只有一次 dict 取值，没有开销
         self.record_archive(u)
+
+        try:
+            import customer_ui
+        except ImportError:
+            customer_ui = None
+        if customer_ui and customer_ui.handle(self, u):
+            return
 
         # 按钮点击
         cq = u.get('callback_query')
@@ -1061,6 +1088,14 @@ class BaseRunner(threading.Thread):
             return
         self.add_admin(aid, user)
         self.send_welcome(aid, '✅ 绑定成功！\n\n' + self.welcome_owner())
+        try:
+            import customer_ui
+        except ImportError:
+            customer_ui = None
+        if customer_ui and customer_ui.supported(self):
+            self.send(aid, '激活完成，可从底部菜单配置机器人。',
+                      reply_markup=customer_ui.keyboard(self, aid))
+            customer_ui.open_config(self, aid)
         log('[%s] 管理员绑定成功：%s (ID %s)' % (self.note(), raw_name(user), aid))
 
     def welcome_owner(self):

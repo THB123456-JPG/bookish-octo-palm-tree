@@ -59,14 +59,15 @@ class LedgerSummary:
 
 
 class LedgerStore:
-    def __init__(self, path: Path | str):
+    def __init__(self, path: Path | str, *, initialize: bool = True):
         self.path = Path(path)
         if self.path.parent:
             self.path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(self.path)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
-        self.init_schema()
+        if initialize:
+            self.init_schema()
 
     def close(self) -> None:
         self.conn.close()
@@ -92,6 +93,15 @@ class LedgerStore:
                 display_name TEXT NOT NULL DEFAULT '',
                 added_by INTEGER NOT NULL,
                 created_at TEXT NOT NULL,
+                PRIMARY KEY (chat_id, user_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS user_pricing (
+                chat_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                rate TEXT,
+                fee_percent TEXT,
+                updated_at TEXT NOT NULL,
                 PRIMARY KEY (chat_id, user_id)
             );
 
@@ -164,7 +174,10 @@ class LedgerStore:
             );
             """
         )
+        legacy_fee_columns = not {'fee_amount', 'payable_amount', 'payable_usdt', 'net_amount'} <= {
+            row['name'] for row in self.conn.execute('PRAGMA table_info(entries)')}
         self._add_column_if_missing("entries", "source_message_id", "INTEGER")
+        self._add_column_if_missing("entries", "flow_label", "TEXT NOT NULL DEFAULT '下发'")
         self._add_column_if_missing("entries", "fee_percent", "TEXT NOT NULL DEFAULT '0.0000'")
         self._add_column_if_missing("entries", "net_amount", "TEXT NOT NULL DEFAULT '0.00'")
         self._add_column_if_missing("entries", "fee_amount", "TEXT NOT NULL DEFAULT '0.00'")
@@ -174,7 +187,9 @@ class LedgerStore:
         self._add_column_if_missing("chat_settings", "fee_percent", "TEXT NOT NULL DEFAULT '0.0000'")
         self._add_column_if_missing("chat_settings", "rate_is_realtime", "INTEGER NOT NULL DEFAULT 0")
         self._add_column_if_missing("chat_settings", "ledger_enabled", "INTEGER NOT NULL DEFAULT 1")
+        self._add_column_if_missing("chat_settings", "all_members_can_record", "INTEGER NOT NULL DEFAULT 1")
         self._add_column_if_missing("chat_settings", "ledger_reset_hour", "INTEGER NOT NULL DEFAULT 3")
+        self._add_column_if_missing("chat_settings", "ledger_cutoff_enabled", "INTEGER NOT NULL DEFAULT 1")
         self._add_column_if_missing("chat_settings", "ledger_transition_at", "TEXT")
         self._add_column_if_missing("chat_settings", "ledger_transition_current", "TEXT")
         self._add_column_if_missing("chat_settings", "ledger_transition_previous", "TEXT")
@@ -183,7 +198,9 @@ class LedgerStore:
         self._add_column_if_missing("chat_settings", "owner_id", "INTEGER")
         self._add_column_if_missing("known_users", "is_bot", "INTEGER NOT NULL DEFAULT 0")
         self._add_column_if_missing("bot_chats", "migrated_to_chat_id", "INTEGER")
-        self._migrate_legacy_fee_snapshots()
+        # Zero can be a valid rounded net amount; backfill only when legacy columns were missing.
+        if legacy_fee_columns:
+            self._migrate_legacy_fee_snapshots()
         self._migrate_legacy_accounting_dates()
         self.conn.execute(
             "INSERT OR IGNORE INTO ledger_entry_messages SELECT chat_id, source_message_id "
@@ -334,6 +351,33 @@ class LedgerStore:
         self.conn.commit()
         return new_rate
 
+    def get_user_settings(self, chat_id: int, user_id: int) -> tuple[Decimal, Decimal]:
+        defaults = self.get_settings(chat_id)
+        row = self.conn.execute("SELECT rate, fee_percent FROM user_pricing WHERE chat_id=? AND user_id=?",
+                                (chat_id, user_id)).fetchone()
+        return tuple(Decimal(row[i]) if row and row[i] is not None else defaults[i] for i in range(2))
+
+    def set_user_setting(self, chat_id: int, user_id: int, field: str,
+                         value: Decimal | str | None) -> None:
+        if field not in ('rate', 'fee_percent'):
+            raise ValueError("个人参数无效")
+        if value is not None:
+            value = Decimal(str(value))
+            if not value.is_finite():
+                raise ValueError("参数必须是有限数字")
+            value = rate(value)
+            if field == 'rate' and value <= 0:
+                raise ValueError("汇率必须大于0")
+            if field == 'fee_percent' and not 0 <= value < 100:
+                raise ValueError("费率范围为0到小于100")
+        # field is restricted above; each override inherits the other group default independently.
+        self.conn.execute(
+            f"INSERT INTO user_pricing (chat_id, user_id, {field}, updated_at) VALUES (?, ?, ?, ?) "
+            f"ON CONFLICT(chat_id, user_id) DO UPDATE SET {field}=excluded.{field}, updated_at=excluded.updated_at",
+            (chat_id, user_id, str(value) if value is not None else None, self._now()),
+        )
+        self.conn.commit()
+
     def is_realtime_rate(self, chat_id: int) -> bool:
         self.ensure_chat(chat_id)
         row = self.conn.execute(
@@ -365,6 +409,18 @@ class LedgerStore:
         )
         self.conn.commit()
 
+    def all_members_can_record(self, chat_id: int) -> bool:
+        self.ensure_chat(chat_id)
+        row = self.conn.execute("SELECT all_members_can_record FROM chat_settings WHERE chat_id = ?",
+                                (chat_id,)).fetchone()
+        return bool(row["all_members_can_record"])
+
+    def set_all_members_can_record(self, chat_id: int, enabled: bool) -> None:
+        self.ensure_chat(chat_id)
+        self.conn.execute("UPDATE chat_settings SET all_members_can_record = ? WHERE chat_id = ?",
+                          (int(enabled), chat_id))
+        self.conn.commit()
+
     def get_ledger_view_mode(self, chat_id: int) -> str:
         self.ensure_chat(chat_id)
         row = self.conn.execute(
@@ -389,22 +445,47 @@ class LedgerStore:
         row = self.conn.execute("SELECT ledger_reset_hour FROM chat_settings WHERE chat_id = ?", (chat_id,)).fetchone()
         return int(row["ledger_reset_hour"])
 
-    def set_ledger_reset_hour(self, chat_id: int, hour: int) -> int:
+    def is_ledger_cutoff_enabled(self, chat_id: int) -> bool:
+        self.ensure_chat(chat_id)
+        return bool(self.conn.execute("SELECT ledger_cutoff_enabled FROM chat_settings WHERE chat_id = ?",
+                                      (chat_id,)).fetchone()[0])
+
+    def set_ledger_cutoff_enabled(self, chat_id: int, enabled: bool) -> None:
+        if enabled:
+            self.set_ledger_reset_hour(chat_id, self.get_ledger_reset_hour(chat_id))
+            return
+        if not self.is_ledger_cutoff_enabled(chat_id):
+            return
+        current, previous = self._accounting_periods(chat_id)
+        self.conn.execute(
+            "UPDATE chat_settings SET ledger_cutoff_enabled = 0, ledger_transition_at = NULL, "
+            "ledger_transition_current = ?, ledger_transition_previous = ? WHERE chat_id = ?",
+            (current, previous, chat_id),
+        )
+        self.conn.commit()
+
+    def set_ledger_reset_hour(self, chat_id: int, hour: int, *, enable: bool = True) -> int:
         self.ensure_chat(chat_id)
         if hour < 0 or hour > 23:
             raise ValueError("日切时间必须是0到23点")
-        if self.get_ledger_reset_hour(chat_id) == hour:
+        if not enable:
+            self.set_ledger_cutoff_enabled(chat_id, False)
+            self.conn.execute("UPDATE chat_settings SET ledger_reset_hour = ? WHERE chat_id = ?", (hour, chat_id))
+            self.conn.commit()
+            return hour
+        was_enabled = self.is_ledger_cutoff_enabled(chat_id)
+        if was_enabled and self.get_ledger_reset_hour(chat_id) == hour:
             return hour
         now = datetime.now(LEDGER_TZ)
         current, previous = self._accounting_periods(chat_id, now)
         closed = self.latest_closed_period(chat_id, now)
         transition = None
-        if self.conn.execute("SELECT 1 FROM entries WHERE chat_id = ? LIMIT 1", (chat_id,)).fetchone():
+        if not was_enabled or self.conn.execute("SELECT 1 FROM entries WHERE chat_id = ? LIMIT 1", (chat_id,)).fetchone():
             transition = datetime.combine(now.date(), time(hour=hour), tzinfo=LEDGER_TZ)
             if transition <= now:
                 transition += timedelta(days=1)
         self.conn.execute(
-            "UPDATE chat_settings SET ledger_reset_hour = ?, ledger_transition_at = ?, "
+            "UPDATE chat_settings SET ledger_cutoff_enabled = 1, ledger_reset_hour = ?, ledger_transition_at = ?, "
             "ledger_transition_current = ?, ledger_transition_previous = ?, "
             "ledger_transition_previous_cutoff = ? WHERE chat_id = ?",
             (hour, transition.isoformat() if transition else None, current, previous,
@@ -439,6 +520,8 @@ class LedgerStore:
         self.ensure_chat(chat_id)
         now = now or datetime.now(LEDGER_TZ)
         row = self.conn.execute("SELECT * FROM chat_settings WHERE chat_id = ?", (chat_id,)).fetchone()
+        if not row["ledger_cutoff_enabled"]:
+            return row["ledger_transition_current"], row["ledger_transition_previous"]
         current = self.accounting_date_for(now.isoformat(), int(row["ledger_reset_hour"]))
         previous = (datetime.fromisoformat(current).date() - timedelta(days=1)).isoformat()
         if row["ledger_transition_at"]:
@@ -452,7 +535,9 @@ class LedgerStore:
                 return current, boundary.isoformat()
         return current, previous
 
-    def next_cutoff_at(self, chat_id: int, now: datetime | None = None) -> datetime:
+    def next_cutoff_at(self, chat_id: int, now: datetime | None = None) -> datetime | None:
+        if not self.is_ledger_cutoff_enabled(chat_id):
+            return None
         cutoff_hour = self.get_ledger_reset_hour(chat_id)
         local_now = (now or datetime.now(LEDGER_TZ)).astimezone(LEDGER_TZ)
         candidate = datetime.combine(local_now.date(), time(hour=cutoff_hour), tzinfo=LEDGER_TZ)
@@ -462,6 +547,8 @@ class LedgerStore:
 
     def latest_closed_period(self, chat_id: int, now: datetime) -> tuple[str, datetime] | None:
         """Return the closed period and its actual cutoff, including a pending cutoff change."""
+        if not self.is_ledger_cutoff_enabled(chat_id):
+            return None
         now = now.astimezone(LEDGER_TZ)
         _, previous = self._accounting_periods(chat_id, now)
         row = self.conn.execute("SELECT * FROM chat_settings WHERE chat_id = ?", (chat_id,)).fetchone()
@@ -591,6 +678,8 @@ class LedgerStore:
         return int(row["total"] if row else 0)
 
     def is_operator(self, chat_id: int, user_id: int, owner_ids: Iterable[int]) -> bool:
+        if chat_id in getattr(self, 'customer_group_ops', {}).get(user_id, []):
+            return True
         if user_id in set(owner_ids):
             return True
         row = self.conn.execute(
@@ -618,6 +707,11 @@ class LedgerStore:
         operator_name: str,
         source_message_id: int | None = None,
         rate: Decimal | str | None = None,
+        pricing_user_id: int | None = None,
+        entry_fee_percent: Decimal | str | None = None,
+        replace_id: int | None = None,
+        expected_entry: LedgerEntry | None = None,
+        flow_label: str = '下发',
     ) -> LedgerEntry | None:
         if kind not in {"income", "payout"}:
             raise ValueError("kind must be income or payout")
@@ -628,6 +722,9 @@ class LedgerStore:
             raise ValueError("amount must not be zero")
 
         current_rate, fee_percent = self.get_settings(chat_id)
+        if kind == "income":
+            current_rate, fee_percent = self.get_user_settings(
+                chat_id, operator_id if pricing_user_id is None else pricing_user_id)
         # ★ 2026-10-08：这一笔可以**单独指定汇率**（`+9000/9 努力` = 9000÷9=1000U）。
         #   不传就用群汇率，跟以前一模一样。
         #   ★ 只对入款生效 —— 下发的数字本来就是 U，不除汇率；
@@ -639,7 +736,20 @@ class LedgerStore:
             if entry_rate <= 0:
                 raise ValueError("汇率必须大于 0")
             current_rate = entry_rate
-        if kind == "income":
+        if kind == "income" and currency.upper() == 'U':
+            fee_percent = Decimal('0')
+            fee_amount = money('0')
+            payable_amount = money(amount_value * current_rate)
+            payable_usdt = amount_value
+            net = amount_value
+        elif kind == "income":
+            if entry_fee_percent is not None:
+                fee_percent = Decimal(str(entry_fee_percent))
+                if not fee_percent.is_finite() or fee_percent >= 100:
+                    raise ValueError('单笔费率必须小于100%，支持负数返佣')
+                fee_percent = fee_percent.quantize(RATE_QUANT, rounding=ROUND_HALF_UP)
+                if fee_percent >= 100:
+                    raise ValueError('单笔费率必须小于100%')
             fee_amount = money(amount_value * fee_percent / Decimal("100"))
             payable_amount = money(amount_value - fee_amount)
             payable_usdt = money(payable_amount / current_rate)
@@ -652,6 +762,10 @@ class LedgerStore:
         now = self._now()
         accounting_date = self._accounting_periods(chat_id, datetime.fromisoformat(now))[0]
         with self.conn:
+            if replace_id is not None:
+                original = self.entry_for_source_message(chat_id, expected_entry.source_message_id) if expected_entry else None
+                if original != expected_entry or original is None or original.id != replace_id:
+                    raise ValueError('原流水已变化，请重新回复原消息修改')
             if source_message_id is not None:
                 receipt = self.conn.execute(
                     "INSERT OR IGNORE INTO ledger_entry_messages VALUES (?, ?)",
@@ -659,6 +773,15 @@ class LedgerStore:
                 )
                 if receipt.rowcount == 0:
                     return None
+            self.mark_history()
+            if replace_id is not None:
+                self.conn.execute(
+                    'UPDATE entries SET kind=?,amount=?,currency=?,rate=?,fee_percent=?,fee_amount=?, '
+                    'payable_amount=?,payable_usdt=?,net_amount=?,note=?,operator_id=?,operator_name=? '
+                    'WHERE id=? AND chat_id=? AND voided_at IS NULL',
+                    (kind,str(amount_value),currency.upper(),str(current_rate),str(fee_percent),str(fee_amount),
+                     str(payable_amount),str(payable_usdt),str(money(net)),note,operator_id,operator_name,replace_id,chat_id))
+                return self.get_entry(replace_id)
             cursor = self.conn.execute(
                 """
                 INSERT INTO entries (
@@ -687,6 +810,7 @@ class LedgerStore:
                     source_message_id,
                 ),
             )
+            self.conn.execute('UPDATE entries SET flow_label=? WHERE id=?', (flow_label, cursor.lastrowid))
         return self.get_entry(int(cursor.lastrowid))
 
     def get_entry(self, entry_id: int) -> LedgerEntry:
@@ -817,11 +941,22 @@ class LedgerStore:
             "SELECT COUNT(*) AS count FROM entries WHERE chat_id = ? AND voided_at IS NULL",
             (chat_id,),
         ).fetchone()
-        self.conn.execute(
-            "DELETE FROM entries WHERE chat_id = ?",
-            (chat_id,),
-        )
-        self.conn.commit()
+        self.last_customer_archive = None
+        with self.conn:
+            self.retain_statistics('chat_id=?', (chat_id,))
+            if getattr(self, 'customer_options', {}).get('archive_bill'):
+                from .commands import format_bill
+                self.conn.execute('CREATE TABLE IF NOT EXISTS customer_bill_archives(id INTEGER PRIMARY KEY, chat_id INTEGER, created_at TEXT, body TEXT)')
+                body = '完整账单存档（全部留存账期）\n' + format_bill(self, chat_id, scope='archive', show_all_records=True)
+                from html import escape
+                body += '\n\n流水日期与币种：\n' + '\n'.join(
+                    '%s · %s · %s %s · %s' % (entry.created_at, entry.kind, entry.amount, entry.currency, escape(entry.note))
+                    for entry in self.entries(chat_id))
+                cursor = self.conn.execute('INSERT INTO customer_bill_archives(chat_id,created_at,body) VALUES(?,?,?)', (chat_id,self._now(),body))
+                self.last_customer_archive = cursor.lastrowid
+            self.conn.execute("DELETE FROM entries WHERE chat_id = ?", (chat_id,))
+            if self.conn.execute("SELECT 1 FROM sqlite_master WHERE name='customer_opening_balances'").fetchone():
+                self.conn.execute('DELETE FROM customer_opening_balances WHERE chat_id=?',(chat_id,))
         return int(count_row["count"])
 
     def clear_entries_before(self, chat_id: int, cutoff_at: str) -> int:
@@ -829,6 +964,7 @@ class LedgerStore:
             "SELECT COUNT(*) AS count FROM entries WHERE chat_id = ? AND created_at < ?",
             (chat_id, cutoff_at),
         ).fetchone()
+        self.retain_statistics('chat_id=? AND created_at<?', (chat_id,cutoff_at))
         self.conn.execute(
             "DELETE FROM entries WHERE chat_id = ? AND created_at < ?",
             (chat_id, cutoff_at),
@@ -837,16 +973,60 @@ class LedgerStore:
         return int(count_row["count"])
 
     def clear_all_entries(self) -> int:
+        self.retain_statistics('1=1', ())
         cursor = self.conn.execute("DELETE FROM entries")
         self.conn.commit()
         return cursor.rowcount
+
+    def retain_statistics(self, condition, params):
+        """Clear the active bill while retaining this month's original monetary snapshots."""
+        self.conn.execute('CREATE TABLE IF NOT EXISTS customer_month_entries AS SELECT * FROM entries WHERE 0')
+        if self.conn.execute('SELECT 1 FROM entries WHERE '+condition+' LIMIT 1',params).fetchone():
+            self.mark_history()
+        self.conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS customer_month_entry_id ON customer_month_entries(id)')
+        month = datetime.now(LEDGER_TZ).strftime('%Y-%m-01')
+        self.conn.execute('INSERT OR IGNORE INTO customer_month_entries SELECT * FROM entries WHERE '
+                          + condition + " AND voided_at IS NULL AND date(created_at,'+8 hours')>=?", (*params,month))
+
+    def prune_month(self):
+        """Keep current-month bills; preserve only opening balances for live financial periods."""
+        month = datetime.now(LEDGER_TZ).strftime('%Y-%m-01')
+        with self.conn:
+            if self.conn.execute('SELECT 1 FROM entries LIMIT 1').fetchone():
+                self.mark_history()
+            self.conn.execute('CREATE TABLE IF NOT EXISTS customer_opening_balances(chat_id INTEGER, period TEXT, balance TEXT, PRIMARY KEY(chat_id,period))')
+            for row in self.conn.execute('SELECT chat_id FROM chat_settings').fetchall():
+                cid=row[0]
+                keep={self.current_accounting_date(cid),self.previous_accounting_date(cid)}
+                records=self.conn.execute("SELECT * FROM entries WHERE chat_id=? AND voided_at IS NULL AND date(created_at,'+8 hours')<?",(cid,month)).fetchall()
+                for period in keep:
+                    balance=sum((Decimal(r['payable_usdt']) if r['kind']=='income' else -Decimal(r['net_amount']) for r in records if r['accounting_date']==period),Decimal(0))
+                    old=self.conn.execute('SELECT balance FROM customer_opening_balances WHERE chat_id=? AND period=?',(cid,period)).fetchone()
+                    self.conn.execute('INSERT OR REPLACE INTO customer_opening_balances VALUES(?,?,?)',(cid,period,str(balance+(Decimal(old[0]) if old else 0))))
+                for old in self.conn.execute('SELECT period FROM customer_opening_balances WHERE chat_id=?',(cid,)).fetchall():
+                    if old[0] not in keep:
+                        self.conn.execute('DELETE FROM customer_opening_balances WHERE chat_id=? AND period=?',(cid,old[0]))
+            self.conn.execute("DELETE FROM entries WHERE date(created_at,'+8 hours')<?",(month,))
+            tables={r[0] for r in self.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            for table in ('customer_month_entries','customer_bill_archives'):
+                if table in tables:
+                    self.conn.execute("DELETE FROM "+table+" WHERE date(created_at,'+8 hours')<?",(month,))
+
+    def opening_balance(self, chat_id, period):
+        exists=self.conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='customer_opening_balances'").fetchone()
+        row=self.conn.execute('SELECT balance FROM customer_opening_balances WHERE chat_id=? AND period=?',(chat_id,period)).fetchone() if exists else None
+        return Decimal(row[0]) if row else Decimal(0)
+
+    def mark_history(self):
+        self.conn.execute('CREATE TABLE IF NOT EXISTS customer_ledger_history(id INTEGER PRIMARY KEY CHECK(id=1))')
+        self.conn.execute('INSERT OR IGNORE INTO customer_ledger_history VALUES(1)')
 
 
     def summary(self, chat_id: int) -> LedgerSummary:
         current_rate, fee_percent = self.get_settings(chat_id)
         rows = self.conn.execute(
             """
-            SELECT kind, net_amount, amount, rate, fee_percent, fee_amount, payable_amount, payable_usdt
+            SELECT kind, net_amount, amount, currency, rate, fee_percent, fee_amount, payable_amount, payable_usdt
             FROM entries
             WHERE chat_id = ? AND voided_at IS NULL
             """,
@@ -859,7 +1039,7 @@ class LedgerStore:
         fees = Decimal("0")
         for row in rows:
             if row["kind"] == "income":
-                income += Decimal(row["amount"])
+                income += Decimal(row["payable_amount"] if row['currency'] == 'U' else row["amount"])
                 fees += Decimal(row["fee_amount"])
                 payable_amount += Decimal(row["payable_amount"])
                 income_usdt += Decimal(row["payable_usdt"])

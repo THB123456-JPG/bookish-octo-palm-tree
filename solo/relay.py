@@ -25,6 +25,7 @@ import json
 import os
 import threading
 import time
+from urllib.parse import urlsplit
 
 import requests
 
@@ -85,6 +86,7 @@ class Reporter:
         self.lock = threading.Lock()
         self.stopped = threading.Event()
         self.thread = None
+        self.config_thread = None
         # 机器人本体（入口调 attach() 挂上来）—— 要读它的绑定状态报给服务商
         self.runner = None
         self._last_state = None
@@ -141,6 +143,57 @@ class Reporter:
         self.runner = runner
         self._last_state = None         # 挂了就立刻报一次
         self._hook_sent(runner)
+        from customer_ui import base_url
+        endpoint = urlsplit(self.url)
+        secure = endpoint.scheme == 'https' or (endpoint.scheme == 'http' and endpoint.hostname in ('127.0.0.1', 'localhost', '::1'))
+        mgr = getattr(runner, 'mgr', None)
+        if self.ready() and secure and mgr and base_url(mgr) and not self.config_thread:
+            self.config_thread = threading.Thread(target=self._run_config, name='customer-config', daemon=True)
+            self.config_thread.start()
+
+    def _config_result(self, job):
+        """Validate Telegram identity again and use the same hosted actions."""
+        import miniapp
+        import sqlite3
+        from decimal import InvalidOperation
+        try:
+            if not isinstance(job, dict) or job.get('expires', 0) <= time.time():
+                raise ValueError('请求已过期，请刷新确认结果后再操作')
+            body = job['body']
+            if not isinstance(body, dict) or not isinstance(body.get('payload', {}), dict):
+                raise ValueError('请求格式无效')
+            bot = self.runner.bot
+            uid = miniapp.identity(body.get('init_data'), bot['token'])
+            if not miniapp.owner_id(bot):
+                raise PermissionError('尚未激活，请先私聊机器人发送 /admin 激活码')
+            data = miniapp.action(self.runner.mgr, bot, uid, job['action'], body.get('payload', {}))
+            result, status = dict(ok=True, data=data), 200
+        except PermissionError as e:
+            result, status = dict(ok=False, error=str(e)), 403
+        except (ValueError, TypeError, KeyError, InvalidOperation) as e:
+            message = str(e) if isinstance(e, ValueError) and not isinstance(e, json.JSONDecodeError) else '请求格式无效'
+            result, status = dict(ok=False, error=message), 400
+        except (sqlite3.Error, OSError):
+            result, status = dict(ok=False, error='数据暂不可用，请稍后重试'), 503
+        return dict(id=job['id'], result=result, status=status)
+
+    def _run_config(self):
+        # Separate from media/report uploads: a slow image must not stall settings.
+        with requests.Session() as sess:
+            reply = None
+            while not self.stopped.is_set():
+                try:
+                    response = sess.post(self.url + '/api/ingest/config', json={'reply': reply or {}},
+                                         headers={'X-Ingest-Sig': self.sig}, timeout=(5, 15), allow_redirects=False)
+                    response.raise_for_status()
+                    body = response.json()
+                    if not body.get('ok'):
+                        raise ValueError('配置连接未就绪')
+                    job = body.get('request')
+                    reply = self._config_result(job) if job else None
+                except Exception:
+                    # Retain the completed response for delivery, never rerun its write.
+                    self.stopped.wait(2)
 
     # -------- ★★ 机器人自己发的消息（账单）--------
     def _hook_sent(self, runner):

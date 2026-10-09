@@ -10,14 +10,12 @@ import os
 import shutil
 import threading
 import time
+import copy
+import importlib
 from datetime import datetime
 
 import core
 from core import TgAPI, TgError, gen_code, gen_id, load_json, log, save_json
-from runners.kefu import KefuRunner
-from runners.ledger import LedgerRunner
-from runners.shop import ShopRunner
-from runners.usdt import UsdtRunner
 
 # 路径统一走 core.xxx（而不是 from core import），
 # 这样测试或换目录时改 core 的属性就能生效
@@ -27,10 +25,10 @@ from runners.usdt import UsdtRunner
 #   改这里的同时，前端的 `<select id="type">` 和 `TYPE_TABS` 也要一起改，
 #   三处保持同一个顺序。（前端现在不读这里的顺序，但别让它俩对不上）
 RUNNERS = {
-    'ledger': (LedgerRunner, '记账机器人'),
-    'kefu': (KefuRunner, '客服机器人'),
-    'usdt': (UsdtRunner, 'USDT助手'),
-    'shop': (ShopRunner, '商城机器人'),
+    'ledger': ('LedgerRunner', '记账机器人'),
+    'kefu': ('KefuRunner', '客服机器人'),
+    'usdt': ('UsdtRunner', 'USDT助手'),
+    'shop': ('ShopRunner', '商城机器人'),
 }
 # ★ 老数据没有 type 字段时按客服算 —— 这个是**兜底**，跟上面的展示顺序无关，
 #   别因为它排第二就以为默认变了
@@ -71,7 +69,13 @@ def days_to_ts(days):
 
 
 def make_runner(manager, bot):
-    cls = RUNNERS.get(bot.get('type') or DEFAULT_TYPE, (KefuRunner, ''))[0]
+    if bot.get('instance_folder') and os.environ.get('PANEL_INSTANCE_CHILD') != '1':
+        from bot_instances import InstanceRunner
+        return InstanceRunner(manager, bot)
+    kind = bot.get('type') or DEFAULT_TYPE
+    if kind not in RUNNERS:
+        kind = DEFAULT_TYPE
+    cls = getattr(importlib.import_module('runners.'+kind), RUNNERS[kind][0])
     return cls(manager, bot)
 
 
@@ -79,9 +83,11 @@ class BotManager:
     def __init__(self, cfg):
         self.cfg = cfg
         self.lock = threading.RLock()
+        self._add_lock = threading.Lock()
         self.bots = []          # 列表，保持添加顺序
         self.runners = {}       # id -> Runner 实例
         self.watchdog_stop = threading.Event()
+        self._instance_seen = {}
         self.load()
 
     # -------- 读写 --------
@@ -123,9 +129,18 @@ class BotManager:
             # ★ 老数据里可能有个 ingest_key 字段 —— 现在不用了
             #   （回传暗号改成从 token 现算，见 core.ingest_sig）。
             #   留着不删：万一已经发给过客户，删了反而对不上。
+            if b.get('instance_folder'):
+                self.find(b['id'])
 
     def save(self):
         with self.lock:
+            from bot_instances import sync
+            for bot in self.bots:
+                if bot.get('instance_folder'):
+                    self._instance_seen[bot['id']] = sync(bot, self._instance_seen.get(bot['id']),
+                        commit=True, child=os.environ.get('PANEL_INSTANCE_CHILD') == '1')
+            if os.environ.get('PANEL_INSTANCE_CHILD') == '1' and self.bots and self.bots[0].get('instance_folder'):
+                return
             save_json(core.BOTS_FILE, {"bots": [
                 {k: v for k, v in b.items() if k not in ('status', 'error')}
                 for b in self.bots
@@ -134,6 +149,11 @@ class BotManager:
     def find(self, bid):
         for b in self.bots:
             if b['id'] == bid:
+                if b.get('instance_folder'):
+                    from bot_instances import sync
+                    with self.lock:
+                        self._instance_seen[bid] = sync(b, self._instance_seen.get(bid),
+                            child=os.environ.get('PANEL_INSTANCE_CHILD') == '1')
                 return b
         return None
 
@@ -142,7 +162,12 @@ class BotManager:
 
     # -------- 增删改 --------
     def add(self, note, token, bot_type=DEFAULT_TYPE, duration=DEFAULT_DURATION,
-            mid='', remote=False):
+            mid='', remote=False, node_id=None):
+        with self._add_lock:
+            return self._add(note,token,bot_type,duration,mid,remote,node_id)
+
+    def _add(self, note, token, bot_type=DEFAULT_TYPE, duration=DEFAULT_DURATION,
+             mid='', remote=False, node_id=None):
         """加一个机器人。
 
         remote=True = 「客户自建」：跑在客户自己的服务器上，
@@ -155,6 +180,17 @@ class BotManager:
             return None, '不支持的机器人类型'
         if duration not in DURATION_MAP:
             duration = DEFAULT_DURATION
+        registry = getattr(self,'nodes',None)
+        node_id = (registry.state['default'] if registry and not remote else '') if node_id is None else node_id
+        if node_id:
+            if remote:
+                return None, '运行服务器与客户自建不能同时选择'
+            from nodes import for_manager, NodeError
+            registry = for_manager(self)
+            try:
+                registry.call(node_id,'info',timeout=5)
+            except NodeError as exc:
+                return None, str(exc)
 
         for b in self.bots:
             if b.get('token') == token:
@@ -200,6 +236,24 @@ class BotManager:
             'status': 'starting',
             'error': '',
         }
+        if node_id:
+            bot.update(node_id=node_id,node_pending=True)
+            with self.lock:
+                self.bots.append(bot)
+                self.save()
+            try:
+                registry.provision(bot)
+            except NodeError:
+                bot.update(status='error',error='部署结果待确认，请重试部署；不会在本机启动')
+                self.save()
+            return bot,None
+        if os.environ.get('PANEL_INSTANCE_CHILD') != '1':
+            from bot_instances import provision
+            try:
+                provision(bot, self.cfg)
+                self._instance_seen[bid] = copy.deepcopy({k: v for k, v in bot.items() if k not in ('status', 'error')})
+            except (OSError, ValueError) as exc:
+                return None, '建立独立机器人目录失败：%s' % exc
         with self.lock:
             self.bots.append(bot)
             self.save()
@@ -240,8 +294,17 @@ class BotManager:
         moved = taken = 0
         cleared = []
         handover = []          # 换主人的记账机器人（要清账本 + 重启）
+        registry = getattr(self,'nodes',None)
+        if registry:
+            for nid in {b['node_id'] for b in self.bots if b.get('node_id') and
+                        (b['id'] in want or (mid and b.get('mid')==mid))}:
+                result = registry.call(nid,'assign',dict(mid=mid,bids=[b['id'] for b in self.bots if b.get('node_id')==nid and b['id'] in want],clear=clear_secrets))
+                moved += result['moved'];taken += result['taken'];cleared += result['cleared']
+                registry.refresh(nid)
         with self.lock:
             for b in self.bots:
+                if b.get('node_id'):
+                    continue
                 bid = b['id']
                 if bid in want:
                     if (b.get('mid') or '') != mid:
@@ -296,6 +359,22 @@ class BotManager:
                ('，%d 台清空了配置' % len(cleared)) if cleared else '',
                ('，%d 台清空了账本' % len(handover)) if handover else ''))
         return moved, taken, cleared
+
+    def reset_shop_scans(self, cleared):
+        for bid in cleared:
+            bot = self.find(bid)
+            if not bot or bot.get('type')!='shop' or bot.get('node_id'):
+                continue
+            runner = self.runners.get(bid)
+            if bot.get('instance_folder') and runner and runner.is_alive():
+                with runner.request('/instance/shop-reset',{}):
+                    pass
+            else:
+                from runners.shop import store
+                current = store.store_for(self,bid)
+                if current is not None:
+                    current.data['scan']={'baseline':False,'seen':[],'last_ts':0}
+                    current.save()
 
     def set_archive_cfg(self, bid, patch):
         """改「群消息记录」的开关和保留天数。
@@ -397,7 +476,8 @@ class BotManager:
 
     def restart_bot(self, bid):
         """停→等→起。改完配置要靠它让新配置生效"""
-        self.wait_runner(self.stop_bot(bid))
+        if not self.wait_runner(self.stop_bot(bid)):
+            raise ValueError('原进程尚未退出，未启动第二个机器人进程')
         self.start_bot(bid)
 
     def set_remote_state(self, bid, data):
@@ -527,7 +607,28 @@ class BotManager:
             me = TgAPI(token).call('getMe')
         except Exception as e:
             return False, '验证失败：%s' % e
-        self.stop_bot(bid)
+        if not self.wait_runner(self.stop_bot(bid)):
+            return False, '原机器人进程尚未退出，未更换Token'
+        if b.get('instance_folder') and me.get('username') != b['instance_folder']:
+            from bot_instances import folder
+            old_path = folder(b)
+            candidate = dict(b, instance_folder=me.get('username', ''))
+            renamed = False
+            try:
+                new_path = folder(candidate)
+                if new_path.exists():
+                    raise ValueError('新用户名的目录已存在')
+                old_path.rename(new_path)
+                renamed = True
+                manifest = load_json(str(new_path / 'INSTANCE.json'), {})
+                manifest['username'] = candidate['instance_folder']
+                save_json(str(new_path / 'INSTANCE.json'), manifest)
+                b['instance_folder'] = candidate['instance_folder']
+            except (ValueError, OSError) as exc:
+                if renamed:
+                    new_path.rename(old_path)
+                self.start_bot(bid)
+                return False, '实例目录改名失败：%s' % exc
         with self.lock:
             b['token'] = token
             b['username'] = me.get('username') or ''
@@ -565,7 +666,23 @@ class BotManager:
         # ★ 必须等线程真的退出再删文件 —— 否则 sqlite 还开着，
         #   Windows 上删不掉，账本会留在硬盘上（商户数据泄露）
         #   ★ 拿 stop_bot 返回的对象去等，不能按 bid 查（那时已经摘掉了）
-        self.wait_runner(self.stop_bot(bid))
+        bot = self.find(bid)
+        if not bot:
+            return False, '找不到这个机器人'
+        if not self.wait_runner(self.stop_bot(bid)):
+            return False, '机器人进程尚未退出，未删除目录和记录'
+        if bot.get('instance_folder'):
+            from bot_instances import remove
+            try:
+                remove(bot)
+            except (OSError, ValueError) as exc:
+                return False, '实例目录删除失败：%s' % exc
+            with self.lock:
+                self.bots = [b for b in self.bots if b['id'] != bid]
+                self._instance_seen.pop(bid, None)
+                self.save()
+            log('已删除机器人 @%s 的整个独立目录' % bot['username'])
+            return True, None
         with self.lock:
             self.bots = [b for b in self.bots if b['id'] != bid]
             self.save()
@@ -593,6 +710,7 @@ class BotManager:
             if os.path.exists(p):
                 log('删不掉 %s（文件还占着，请手动删）' % name)
         log('已删除机器人 %s' % bid)
+        return True, None
 
     def set_enabled(self, bid, enabled):
         b = self.find(bid)
@@ -649,7 +767,7 @@ class BotManager:
         # ★★ 「客户自建」的**绝对不能跑**：客户的机器上已经在跑了，
         #    同一个 token 两边同时 getUpdates = 409 冲突，两边都收不到消息。
         #    它只靠客户那边主动回传（见 runners/ledger/api.py）。
-        if b.get('remote'):
+        if b.get('remote') or b.get('node_id'):
             return False
         return self.is_expired(b) or bool(b.get('enabled', True))
 
@@ -670,6 +788,8 @@ class BotManager:
 
         with self.lock:
             for b in list(self.bots):
+                if b.get('node_id'):
+                    continue  # The execution node owns expiry even while the panel is offline.
                 exp = int(b.get('expire_at') or 0)
                 if not exp:
                     continue                        # 永久，不管
@@ -738,6 +858,8 @@ class BotManager:
         b = self.find(bid)
         if not b:
             return
+        if b.get('node_id'):
+            return
         # ★ 清历史数据必须**走在 should_run 之前**：停用/过期的机器人也要清，
         #   否则商户把机器人停着不动，上个商户的群名就一直留在库里，
         #   等他哪天启用就直接看到了
@@ -748,9 +870,14 @@ class BotManager:
             old = self.runners.get(bid)
             if old and old.is_alive():
                 return
+            if b.get('type') == 'ledger' and not b.get('instance_folder') and os.environ.get('PANEL_INSTANCE_CHILD') != '1':
+                from bot_instances import provision
+                provision(b, self.cfg, migrate=True)
+                self._instance_seen[bid] = copy.deepcopy({k: v for k, v in b.items() if k not in ('status', 'error')})
+                self.save()
             r = make_runner(self, b)
             self.runners[bid] = r
-        r.start()
+            r.start()
 
     def wait_runner(self, r, timeout=15):
         """等这个 runner 的线程真的退出，然后把它的 sqlite 关掉。
@@ -802,9 +929,9 @@ class BotManager:
             return
         bid = b['id']
         leftover = []
-        targets = [os.path.join(core.DATA_DIR, bid + s)
+        targets = [os.path.join(core.bot_data_dir(b), bid + s)
                    for s in self.HANDOVER_FILES]
-        targets += [os.path.join(core.DATA_DIR, bid + d)
+        targets += [os.path.join(core.bot_data_dir(b), bid + d)
                     for d in self.HANDOVER_DIRS]
         for p in targets:
             exists = os.path.exists(p)
@@ -877,7 +1004,12 @@ class BotManager:
             for b in self.bots:
                 if only is not None and (b.get('mid') or '') != only:
                     continue
+                self.find(b['id'])
                 r = self.runners.get(b['id'])
+                if b.get('instance_folder') and r and hasattr(r, 'info'):
+                    info = r.info()
+                    if info:
+                        b['status'], b['error'] = info.get('status') or 'starting', info.get('error') or ''
                 item = {
                     'id': b['id'],
                     'mid': b.get('mid') or '',      # 归属哪个商户，前端要用
@@ -885,6 +1017,10 @@ class BotManager:
                     'type_name': type_name(b.get('type') or DEFAULT_TYPE),
                     'note': b.get('note') or '',
                     'username': b.get('username') or '',
+                    'instance_folder': b.get('instance_folder') or '',
+                    'node_id': b.get('node_id') or '',
+                    'node_folder': b.get('node_folder') or '',
+                    'node_pending': bool(b.get('node_pending')),
                     'name': b.get('name') or '',
                     'bind_code': b.get('bind_code') or '',
                     'bound': bool(b.get('admin_ids')),
@@ -923,7 +1059,10 @@ class BotManager:
                     },
                 }
                 if r is not None:
-                    if item['type'] == 'usdt':
+                    if b.get('instance_folder'):
+                        item['stat'] = int(r.stat() or 0)
+                        item['stat_label'] = {'ledger':'记账群','shop':'待处理','usdt':'监听地址','kefu':'客户'}.get(item['type'],'')
+                    elif item['type'] == 'usdt':
                         item['stat'] = len(getattr(r, 'watches', []) or [])
                         item['stat_label'] = '监听地址'
                     elif item['type'] == 'shop':
@@ -933,7 +1072,7 @@ class BotManager:
                     elif item['type'] == 'ledger':
                         # ★ 读 runner 的内存快照，**绝不能碰它的 sqlite** ——
                         #   sqlite 连接是那个线程私有的，面板线程去读会报错
-                        item['stat'] = int(getattr(r, '_group_count', 0) or 0)
+                        item['stat'] = int(r.stat() if b.get('instance_folder') else getattr(r, '_group_count', 0) or 0)
                         item['stat_label'] = '记账群'
                     else:
                         item['stat'] = len(getattr(r, 'customers', {}) or {})
@@ -945,5 +1084,19 @@ class BotManager:
                     item['has_secrets'] = any(
                         str(sh.get(k) or '').strip()
                         for k in SHOP_CLEAR_ON_ASSIGN)
+                if b.get('node_id'):
+                    registry = getattr(self,'nodes',None)
+                    try:
+                        item['server_name'] = registry.get(b['node_id'])['name'] if registry else '运行服务器'
+                    except OSError:
+                        item['server_name'] = '未连接服务器'
+                    node_status = registry.cache.get(b['node_id'],{}) if registry else {}
+                    if not node_status.get('online') or time.time()-node_status.get('updated_at',0)>45:
+                        item.update(status='error',error='服务器连接中断，实际运行状态待确认')
+                    item.update(stat=b.get('node_stat',0),stat_label=b.get('node_stat_label',''),
+                                has_secrets=bool(b.get('node_has_secrets')))
+                else:
+                    registry = getattr(self,'nodes',None)
+                    item['server_name'] = registry.state['local']['name'] if registry else '本机服务器'
                 out.append(item)
             return out
