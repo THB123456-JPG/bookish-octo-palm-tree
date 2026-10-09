@@ -312,6 +312,7 @@ class MessageArchive:
     def forget_chat(self, chat_id):
         """把某个群的记录整个删掉（面板上的「清空这个群」）"""
         with self._lock, _db(self.path) as db:
+            db.execute('BEGIN IMMEDIATE')
             names = []
             for (payload,) in db.execute(
                     'SELECT payload FROM events WHERE chat_id=?', (str(chat_id),)):
@@ -320,7 +321,7 @@ class MessageArchive:
                     names.append(n)
             n = db.execute('DELETE FROM events WHERE chat_id=?',
                            (str(chat_id),)).rowcount
-        self._unlink(names)
+            self._unlink(names)
         return n
 
     def clear_all(self):
@@ -334,7 +335,9 @@ class MessageArchive:
     def _unlink(self, names):
         for name in names:
             try:
-                (self.media / name).unlink(missing_ok=True)
+                path = self.media_path(name)
+                if path:
+                    path.unlink(missing_ok=True)
             except OSError:
                 pass
 

@@ -19,6 +19,53 @@ def message(mid, text='', cid=-101, **extra):
 
 
 class ArchiveReplyTests(unittest.TestCase):
+    def test_delete_one_chat_preserves_other_data_and_allows_new_messages(self):
+        from contextlib import closing
+        bills = Path(self.tmp.name)/'fake.sqlite3'
+        bills.write_bytes(b'protected ledger and permissions')
+        for cid in (-101, -202):
+            self.archive.record_result(message(1, 'History', cid=cid,
+                                               photo=[dict(file_id='FAKE_PHOTO')]))
+            self.assertTrue(self.archive.put_media(cid, 1, 'FAKE_PHOTO', b'image'))
+        media = {row['chat_id']:row['media'] for row in self.archive.messages()}
+        with closing(MessageArchive(Path(self.tmp.name)/'other.archive.sqlite3')) as other:
+            other.record_result(message(1, 'Other bot'))
+            with closing(MessageArchive(self.archive.path)) as panel_archive:
+                self.assertEqual(panel_archive.forget_chat(-101), 1)
+                self.assertEqual(panel_archive.forget_chat(-101), 0)
+            self.assertEqual(len(other.messages()), 1)
+        self.assertEqual([row['chat_id'] for row in self.archive.chats()], ['-202'])
+        self.assertIsNone(self.archive.media_path(media['-101']))
+        self.assertEqual(self.archive.media_path(media['-202']).read_bytes(), b'image')
+        self.assertFalse(self.archive.put_media(-101, 1, 'FAKE_PHOTO', b'late image'))
+        self.assertIsNone(self.archive.media_path(media['-101']))
+        self.archive.record_result(message(2, 'New message'))
+        self.assertEqual([row['text'] for row in self.archive.messages(chat_id=-101)], ['New message'])
+        self.assertEqual(len(self.archive.chats()), 2)
+        self.assertEqual(bills.read_bytes(), b'protected ledger and permissions')
+
+    def test_only_confirmed_migration_is_labeled_and_history_is_unchanged(self):
+        from contextlib import closing
+        from runners.ledger.api import _archive_chats
+        from runners.ledger.storage import LedgerStore
+        path = Path(self.tmp.name)/'fake.sqlite3'
+        with closing(LedgerStore(path)) as store:
+            store.migrate_bot_chat(-101, -202, 'Same group name')
+            store.remember_bot_chat(-303, 'Same group name', 'group')
+        for cid in (-101, -202, -303):
+            self.archive.record_result(message(1, 'History', cid=cid))
+        before = {p.name:p.read_bytes() for p in (path, self.archive.path)}
+        with patch.object(core, 'bot_data_dir', return_value=self.tmp.name):
+            rows = _archive_chats(self.archive, {'id':'fake'})
+        self.assertEqual({r['chat_id']:r.get('migrated_to_chat_id') for r in rows},
+                         {'-101':'-202', '-202':None, '-303':None})
+        self.assertEqual(sum(r['count'] for r in rows), 3)
+        self.assertEqual(before, {p.name:p.read_bytes() for p in (path, self.archive.path)})
+        with patch.object(core, 'bot_data_dir', return_value=self.tmp.name):
+            rows = _archive_chats(self.archive, {'id':'missing_ledger'})
+        self.assertFalse(any(r.get('migrated_to_chat_id') for r in rows))
+        self.assertFalse((Path(self.tmp.name)/'missing_ledger.sqlite3').exists())
+
     def test_expired_media_is_removed_without_touching_current_media_or_bills(self):
         now = datetime.now(TZ)
         self.archive.record_result(message(1,photo=[dict(file_id='FAKE_OLD')]))

@@ -535,6 +535,8 @@ function renderSide(){
        + ' title="右键可以置顶">'
        + (isPinned(id) ? '<span class="pin">📌</span>' : '')
        + '<div class="txt"><b>' + esc(c.title) + '</b>'
+       + (c.migrated_to_chat_id ? '<div class="muted" title="升级后的群 ID：' + esc(c.migrated_to_chat_id) + '">升级前记录</div>' : '')
+       + '<div class="muted">ID ' + esc(id) + '</div>'
        + '<div class="muted">' + c.count + ' 条 · ' + fmt(c.last_ts).slice(5, 16)
        + '</div></div>'
        + (n ? '<span class="badge">' + (n > 99 ? '99+' : n) + '</span>' : '')

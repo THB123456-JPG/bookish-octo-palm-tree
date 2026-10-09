@@ -370,10 +370,10 @@ body.chatting #memBox{flex:0 0 auto;max-height:40vh}
     <button class="tab on" data-pane="msg">📜 消息记录</button>
     <button class="tab" data-pane="bots">📋 机器人列表</button>
     <button class="tab" data-pane="add">➕ 添加机器人</button>
+    <button class="tab" data-pane="server">◉ 服务器监控<span id="serverRenewBadge" hidden role="img" aria-label="服务器即将到期"></span></button>
     <button class="tab" data-pane="merch">👥 商户管理</button>
     <button class="tab" data-pane="help">📖 使用说明</button>
     <button class="tab" data-pane="logs">🔐 登录记录</button>
-    <button class="tab" data-pane="server">◉ 服务器监控<span id="serverRenewBadge" hidden role="img" aria-label="服务器即将到期"></span></button>
     <button class="tab" data-pane="appearance">⚙️ 全局设置</button>
   </div>
 
@@ -2770,6 +2770,27 @@ function muteChat(bid, cid, mute){
     }).catch(function(){ toast('设置失败'); });
 }
 
+function clearChat(bid, cid, button){
+  if(!confirm('删除该群在服务器保存的消息和图片？\nTelegram 消息、记账流水和群权限保留。\n保持记录开启，有新消息时该群会重新出现。')) return;
+  button.disabled = true;
+  api('/api/archive/' + bid + '/clear',
+      {method: 'POST', body: JSON.stringify({chat_id: cid})})
+    .then(function(d){
+      if(!d.ok){ toast(d.error || '删除失败'); return; }
+      var seen = msgSeen(bid);
+      delete seen[String(cid)];
+      msgSaveSeen(bid, seen);
+      try{ localStorage.setItem('panel_pinned_' + bid, JSON.stringify(
+        getPinChats(bid).filter(function(x){ return x !== String(cid); }))); }catch(e){}
+      toast('已删除 ' + d.deleted + ' 条记录');
+      if(MSG.BID === bid && MSG.LEVEL === 2 && CUR_TAB === 'msg'){
+        MSG.VERSION++;
+        return msgOpenBot(bid, true);
+      }
+    }).catch(function(){ toast('删除失败，请重试'); })
+    .finally(function(){ button.disabled = false; });
+}
+
 /* ---- 第 2 级：这个机器人有哪些群 ---- */
 function msgOpenBot(bid, silent){
   if(MSG.BID !== bid || MSG.LEVEL !== 2){MSG.VERSION++;}
@@ -2835,6 +2856,8 @@ function msgOpenBot(bid, silent){
           + '" onclick="msgOpenChat(\'' + jsq(cid) + '\', \''
           + jsq(c.title) + '\')" title="点这一行看群消息">'
           + '<td>' + (pin ? '📌 ' : '') + '<b>' + esc(c.title) + '</b>'
+            + (c.migrated_to_chat_id ? ' <span class="muted" title="升级后的群 ID：' + esc(c.migrated_to_chat_id) + '">（升级前记录）</span>' : '')
+            + '<div class="muted">ID ' + esc(cid) + '</div>'
             + (mute ? ' <span class="muted">（已停记）</span>' : '')
             + (cnote ? '<div class="muted" style="color:#e3b341">📝 '
                        + esc(cnote) + '</div>' : '') + '</td>'
@@ -2853,7 +2876,9 @@ function msgOpenBot(bid, silent){
             + '<button class="' + (pin ? '' : 'gray') + ' sm"'
             + ' onclick="stopEv(event);pinChat(\'' + jsq(cid) + '\')"'
             + ' title="' + (pin ? '取消置顶' : '置顶，排到最前面')
-            + '">' + (pin ? '已置顶' : '置顶') + '</button>'
+            + '">' + (pin ? '已置顶' : '置顶') + '</button> '
+            + '<button class="red sm" onclick="stopEv(event);clearChat(\''
+            + b.id + '\',\'' + jsq(cid) + '\',this)">删除记录</button>'
           + '</td></tr>';
       });
       setHTML('msgChats', h + '</table></div>');

@@ -225,7 +225,7 @@ class NodesTests(unittest.TestCase):
                         self.assertTrue((remote/'instances'/bot['username']/'data').is_dir())
                     ledger=created[0];folder=remote/'instances'/ledger['username']
                     def update(text,index,chat=None):
-                        core.save_json(str(folder/'incoming.json'),[{'update_id':index,'message':dict(message_id=index,text=text,
+                        core.save_json(str(folder/'incoming.json'),[{'update_id':index,'message':dict(message_id=index,text=text,date=int(time.time()),
                             chat={'id':chat or 111,'type':'supergroup' if chat else 'private'},
                             **{'from':{'id':111,'first_name':'Fake'}})}])
                         wait(lambda:not (folder/'incoming.json').exists())
@@ -241,6 +241,18 @@ class NodesTests(unittest.TestCase):
                     self.assertEqual(denied[0],403)
                     self.assertFalse((Path(core.DATA_DIR)/(ledger['id']+'.sqlite3')).exists())
                     self.assertTrue(call('/api/archive/'+ledger['id']+'/chats')[1]['ok'])
+                    archive_url='/api/archive/'+ledger['id']
+                    wait(lambda:len(call(archive_url+'/chats')[1].get('chats',[]))==2)
+                    bills_before=call('/api/miniapp/'+ledger['id']+'/bills',dict(init_data=auth,payload={'chat_id':-111}))[1]
+                    deleted=call(archive_url+'/clear',{'chat_id':-111})[1]
+                    self.assertTrue(deleted['ok'])
+                    self.assertGreater(deleted['deleted'],0)
+                    self.assertEqual([c['chat_id'] for c in call(archive_url+'/chats')[1]['chats']],['-222'])
+                    self.assertEqual(call('/api/miniapp/'+ledger['id']+'/bills',dict(init_data=auth,payload={'chat_id':-111}))[1],bills_before)
+                    self.assertFalse((Path(core.DATA_DIR)/(ledger['id']+'.archive.sqlite3')).exists())
+                    update('New archive message',4,-111)
+                    wait(lambda:len(call(archive_url+'/chats')[1].get('chats',[]))==2)
+                    self.assertEqual([m['text'] for m in call(archive_url+'/messages?chat=-111')[1]['messages']],['New archive message'])
                     self.assertTrue(call('/api/archive/unread_all',{'seen':{}})[1]['ok'])
                     shop=created[1]
                     self.assertTrue(call('/api/shop/'+shop['id']+'/config',{'notice':'Node only'})[1]['ok'])

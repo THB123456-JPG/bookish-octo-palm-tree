@@ -66,7 +66,41 @@ BANKS = {
     "LYB": "洛阳银行", "ZZB": "郑州银行", "HKB": "汉口银行",
     "CSRCB": "长沙银行", "SXRCU": "山西省农村信用社",
     "COMM": "交通银行", "SPABANK": "平安银行",
+    "BJBANK": "北京银行", "SHBANK": "上海银行", "HZCB": "杭州银行",
+    "CZBANK": "浙商银行",
 }
+
+# 中国境内客服电话，2026-10-09 核对以下官方页面；未收录的银行不猜号码。
+# 本地补充电话号码，不增加银行卡查询请求，也不据银行名称推测开户地区。
+BANK_PHONES = {
+    "ICBC": "95588",  # https://www.icbc.com.cn/HtmlPatch/ICBC/shouye/kehufuwu.htm
+    "ABC": "95599",  # https://www.abchina.com/cn/AboutABC/CSR/SRPractice/202603/W020260304616763436670.pdf
+    "CCB": "95533",  # https://www.ccb.com/cn/html1/office/grb/22/khtscllc.pdf
+    "BOC": "95566",  # https://www.boc.cn/big5/custserv/cspb/
+    "BCM": "95559",  # https://www.bankcomm.com/BankCommSite/jyjr/cn/contactUs/contactUs.html
+    "PSBC": "95580",  # https://www.psbc.com/cn/grfw/grdzyh/dhyh/
+    "CMB": "95555",  # https://cmbchina.com/corporate/common?pageid=contactus
+    "SPDB": "95528",  # https://www.spdb.com.cn/ebankinfo/contactusfooter/201609/t20160922_312435.shtml
+    "CITIC": "95558",  # https://www.citicbank.com/common/question/customer/
+    "CEB": "95595",  # https://www.cebbank.com/site/dzyx/dhyx/index.html
+    "HXB": "95577",  # https://wap.hxb.com.cn/wap/jrhx/tsslycl/index.shtml
+    "CMBC": "95568",  # https://en.cmbc.com.cn/EBanking/TelephoneBank/BusinessIntroduction/index.htm
+    "GDB": "400-830-8003",  # https://www.cgbchina.com.cn/Channel/12429745
+    "CIB": "95561",  # https://www.cib.com.cn/en/e-banking/telephone/guide.html
+    "PAB": "95511转3",  # https://www.pingan.com/pacms/zhandiangongneng/kefu.jsp
+    "CZB": "95527",  # https://www.czbank.com/cn/pub_info/contactus/
+    "EGBANK": "95395",  # https://www.hfbank.com.cn/xgbz/yhk/pk/index.shtml
+    "CBHB": "95541",  # https://www.cbhb.com.cn/enweb/sitemaps/index.shtml
+    "BOB": "95526",  # https://www.bankofbeijing.com.cn/
+    "BOS": "95594",  # https://wallet.95516.com/s/wl/webV3/help/twoThreeHelp.html
+    "NBCB": "95574",  # https://www.nbcb.com.cn/lxwm/
+    "HZBANK": "95398",  # https://ebank.hzbank.com.cn/custody/
+    "NJCB": "95302",  # https://www.njcb.com.cn/njcb/index/khfw3/index.html
+    "HSBANK": "40088-96588",  # https://www.hsbank.com.cn/Channel/430264
+    "JSBANK": "95319",  # https://www.jsbchina.cn/data/tosend/resource/upload/20250924/74641758676961486.pdf
+}
+BANK_ALIASES = {"COMM": "BCM", "SPABANK": "PAB", "CGB": "GDB",
+                "BJBANK": "BOB", "SHBANK": "BOS", "HZCB": "HZBANK", "CZBANK": "CZB"}
 
 CARD_TYPES = {"DC": "借记卡（储蓄卡）", "CC": "信用卡",
               "SCC": "准贷记卡", "PC": "预付费卡"}
@@ -331,11 +365,17 @@ def bank_info(card: str, appcode: str = "") -> dict:
     if not data.get("validated"):
         return {}
     code = (data.get("bank") or "").strip()
+    bank = BANK_ALIASES.get(code.upper(), code.upper())
+    card_type = (data.get("cardType") or "").upper()
+    phone = BANK_PHONES.get(bank, "")
+    if card_type in ("CC", "SCC"):
+        phone = {"GDB": "95508", "PAB": "95511转2"}.get(bank, phone)
     return {"source": "basic",
             "bank": code,
             "bank_name": BANKS.get(code.upper(), code or "未知"),
             "card_type": CARD_TYPES.get((data.get("cardType") or "").upper(),
                                         data.get("cardType") or "未知"),
+            "bank_phone": phone,
             "note": note}
 
 
@@ -387,6 +427,8 @@ def format_card(kind: str, num: str, info: dict) -> str:
         else:
             lines.append("银行：%s" % info.get("bank_name", "未知"))
             lines.append("类型：%s" % info.get("card_type", "未知"))
+            if info.get("bank_phone"):
+                lines.append("银行电话：%s" % info["bank_phone"])
             if info.get("note"):
                 # ★ 只有「配了密钥但没查成」才出这句（是异常，得说）
                 lines.append("⚠️ %s" % info["note"])

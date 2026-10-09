@@ -858,7 +858,7 @@ class LedgerRunner(BaseRunner):
 
     def _bank_key_help(self):
         return ('银行卡查询可以配一个**查询密钥**（配了才查得到'
-                '<b>归属地、联行号、银行电话</b>）。\n\n'
+                '<b>归属地、联行号</b>）。\n\n'
                 '去百度 API 商城申请「银行卡基本信息」这个接口：\n'
                 '  https://apis.baidu.com/store/detail/'
                 '851818e8-03e4-4a24-8a03-62a9bd0fd3db\n'
@@ -868,13 +868,13 @@ class LedgerRunner(BaseRunner):
                 '  <code>设置银行密钥 你的AppCode</code>\n'
                 '<code>银行密钥</code> 看现在配没配\n'
                 '（<b>不要发在这个群里</b>）\n\n'
-                '★ 不配也能用：银行名和卡类型走免费接口，只是没有归属地。')
+                '不配密钥可查银行、卡类型和常见银行客服电话；归属地需配置接口。')
 
     def set_bank_key(self, actor, msg, cmd):
         """主人私聊设置「银行卡查询密钥」（百度 API 商城的 AppCode）
 
         ★ **不配也能用** —— 银行名和卡类型走支付宝那个免费接口。
-          配了才有**归属地 / 联行号 / 银行电话**（那些只有付费接口给）。
+          配了才有**归属地 / 联行号**；常见银行客服电话由本地表补充。
         ★ 只认机器人主人。设置了**不回显**，只报后 4 位。
         ★★★ 密钥存在 `data/<机器人id>.json` 的 `bank_appcode` 里 ——
           跟 TronGrid Key 一个地方（**不推送、不进日志、不进归档**），
@@ -902,7 +902,7 @@ class LedgerRunner(BaseRunner):
                                 % cur[-4:])
             else:
                 self.send_html(uid, '现在<b>没配</b>银行卡查询密钥 —— '
-                                    '只能查银行名和卡类型。\n\n' +
+                                    '可查银行、卡类型和常见银行客服电话。\n\n' +
                                 self._bank_key_help())
             return True
 

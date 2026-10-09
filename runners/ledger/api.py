@@ -19,6 +19,10 @@
 """
 import json
 import os
+import re
+import sqlite3
+from contextlib import closing
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import requests
@@ -125,6 +129,24 @@ def _fix_owner(rows, bot):
     return rows
 
 
+def _archive_chats(archive, bot):
+    rows = archive.chats()
+    path = Path(core.bot_data_dir(bot)) / (bot['id'] + '.sqlite3')
+    if path.is_file():
+        try:
+            with closing(sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True)) as db:
+                migrations = dict(db.execute('SELECT chat_id, migrated_to_chat_id FROM bot_chats '
+                                             'WHERE migrated_to_chat_id IS NOT NULL'))
+        except sqlite3.Error as exc:
+            log('读取群升级标记失败（历史消息仍可查看）：%s' % exc)
+            return rows
+        for row in rows:
+            target = migrations.get(int(row['chat_id']))
+            if target:
+                row['migrated_to_chat_id'] = str(target)
+    return rows
+
+
 def handle_get(h, path):
     """GET /api/ledger/*  和  /api/archive/*"""
 
@@ -157,7 +179,7 @@ def handle_get(h, path):
                      'empty': True})
             return True
         if what == 'chats':
-            h._json({'ok': True, 'chats': arc.chats(), 'stats': arc.stats()})
+            h._json({'ok': True, 'chats': _archive_chats(arc, bot), 'stats': arc.stats()})
             return True
         # 群成员（点消息流表头那个「👥 群成员」标签看的就是这个）
         # ★ 口径见 archive.members()：Telegram 不给拉全量成员，
@@ -277,6 +299,31 @@ def handle_get(h, path):
 
 def handle_post(h, path, me):
     """POST /api/ledger/*  和  /api/archive/*（me 是 panel.py 鉴权过的身份）"""
+
+    if (path.startswith('/api/archive/') and path.endswith('/clear')
+            and len(path.strip('/').split('/')) == 4):
+        if not h._admin_only(me):
+            return True
+        bid = path.split('/')[3]
+        bot = h._bot_of(me, bid)
+        if bot is None:
+            return True
+        body = h._body()
+        cid = str(body.get('chat_id', '')) if isinstance(body, dict) else ''
+        if bot.get('type') not in core.ARCHIVE_TYPES or not re.fullmatch(r'-[1-9][0-9]{0,15}', cid):
+            h._json({'ok': False, 'error': '请选择要删除记录的群'}, 400)
+            return True
+        arc = h._archive_of(bid)
+        if arc is None and (Path(core.bot_data_dir(bot))/(bid+'.archive.sqlite3')).exists():
+            h._json({'ok': False, 'error': '消息记录暂时无法打开，请稍后重试'}, 503)
+            return True
+        deleted = 0
+        if arc is not None:
+            with closing(arc):
+                deleted = arc.forget_chat(cid)
+        log('删除群消息记录：%s / %s，%d 条' % (bid, cid, deleted))
+        h._json({'ok': True, 'deleted': deleted})
+        return True
 
     # ================= 群消息记录：改配置 =================
     if (path.startswith('/api/archive/') and path.endswith('/config')

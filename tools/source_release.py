@@ -23,7 +23,7 @@ TESTS = ['_test_source_release', '_test_nodes', '_test_server_monitor', '_test_a
     '_test_client_onboarding', '_test_customer_config', '_test_miniapp', '_test_customer_ui',
     '_test_personnel', '_test_disable_cutoff', '_test_entry_formats', '_test_personal_pricing',
     '_test_owner_statistics', '_test_group_ready', '_test_hosted_mode', '_test_solo_config',
-    '_test_miniapp_scope', '_test_tron_miniapp']
+    '_test_miniapp_scope', '_test_tron_miniapp', '_test_bank_lookup']
 
 
 def allowed(name):
