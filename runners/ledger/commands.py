@@ -60,9 +60,9 @@ BLUE_LINK = "https://t.me/"
 
 
 GROUP_READY_TEXT = ('✅️ 记账机器人已就绪。\n\n'
-                    '授权操作人可记账。\n'
+                    '默认仅授权人员可记账。\n'
                     '添加操作人：<code>添加操作人 @用户名</code>\n'
-                    '全员记账：<code>设置全员</code>\n'
+                    '开启全员请发送：<code>设置全员</code>\n'
                     '使用说明：<code>帮助</code>')
 
 

@@ -738,11 +738,16 @@ def action(mgr, bot, uid, name, payload):
             targets = permissions['groups']
             if not isinstance(targets, list) or any(type(i) is not int for i in targets):
                 raise ValueError('单群授权格式无效')
-            with closing(connect(bot)) as conn:
-                active = {r[0] for r in conn.execute('SELECT chat_id FROM bot_chats WHERE is_active=1')}
-            if not set(targets) <= active or not any(permissions.values()):
-                raise ValueError('请选择至少一项权限和有效群组')
+            if permissions['global_ops']:
+                targets = []
+            if targets:
+                with closing(connect(bot)) as conn:
+                    active = {r[0] for r in conn.execute('SELECT chat_id FROM bot_chats WHERE is_active=1')}
+                if not set(targets) <= active:
+                    raise ValueError('请选择有效群组')
             permissions['groups'] = sorted(set(targets))
+            if not any(permissions.values()):
+                raise ValueError('请选择至少一项权限')
         with mgr.lock:
             ids = [int(i) for i in bot.get('admin_ids') or []]
             if add and target not in ids:

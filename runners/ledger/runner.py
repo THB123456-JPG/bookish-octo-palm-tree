@@ -1638,8 +1638,12 @@ class LedgerRunner(BaseRunner):
 
     def _broadcast_kb(self, uid):
         st = self._bc.get(uid) or {}
-        return G.group_selection_keyboard(st.get('groups') or [],
-                                          st.get('selected') or set(), 'broadcast')
+        kb = G.group_selection_keyboard(st.get('groups') or [],
+                                        st.get('selected') or set(), 'broadcast')
+        kb['inline_keyboard'].insert(-1, [
+            {'text': '全选', 'callback_data': 'broadcast:all'},
+            {'text': '取消全选', 'callback_data': 'broadcast:clear'}])
+        return kb
 
     def broadcast_input(self, actor, msg, text):
         """正在等广播内容时，这条消息就是内容。返回 True 表示吃掉了"""
@@ -1730,22 +1734,30 @@ class LedgerRunner(BaseRunner):
                              args=(uid, mid, targets, content),
                              daemon=True, name='ledger-bc').start()
             return
-        if data.startswith('broadcast:toggle:'):
-            try:
-                cid = int(data.rsplit(':', 1)[1])
-            except ValueError:
-                self._answer(cb_id, '')
-                return
+        if data in ('broadcast:all', 'broadcast:clear') or data.startswith('broadcast:toggle:'):
             if not st:
                 self._answer(cb_id, '菜单已失效')
                 return
-            if cid in st['selected']:
-                st['selected'].discard(cid)
+            available = {int(g['chat_id']) for g in st['groups']}
+            if data == 'broadcast:all':
+                selected = available
+            elif data == 'broadcast:clear':
+                selected = set()
             else:
-                st['selected'].add(cid)
+                try:
+                    cid = int(data.rsplit(':', 1)[1])
+                except ValueError:
+                    self._answer(cb_id, '')
+                    return
+                if cid not in available:
+                    self._answer(cb_id, '群不在当前列表中')
+                    return
+                selected = st['selected'] ^ {cid}
+            changed = selected != st['selected']
+            st['selected'] = selected
             st['at'] = time.time()
             self._answer(cb_id, '')
-            if mid:
+            if mid and changed:
                 try:
                     self.api.call('editMessageReplyMarkup', chat_id=uid,
                                   message_id=mid,

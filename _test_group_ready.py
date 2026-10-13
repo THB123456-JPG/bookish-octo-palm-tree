@@ -66,6 +66,7 @@ class GroupReadyTests(unittest.TestCase):
 
     def test_join_events_in_either_order_send_once_and_bind_adder(self):
         self.bot['admin_ids'].append(333)
+        self.bot['ledger']['customer'] = {'basics': {'all_members_can_record': True}}
         for cid, order in ((-10011, ('mcm', 'service')), (-10022, ('service', 'mcm'))):
             self.calls.clear()
             chat = {'id': cid, 'type': 'supergroup', 'title': '新群'}
@@ -82,6 +83,7 @@ class GroupReadyTests(unittest.TestCase):
             self.assertNotIn('reply_markup', self.sent()[0])
             self.assertEqual(self.r.store.get_chat_owner_id(cid), 333)
             self.assertFalse(self.r.store.entries(cid))
+            self.assertFalse(self.r.store.all_members_can_record(cid))
             self.r.handle({'my_chat_member': {'chat': chat, 'from': frm,
                            'old_chat_member': {'status': 'member'}, 'new_chat_member': {'status': 'administrator'}}})
             self.assertEqual(len(self.sent()), 1)
@@ -90,6 +92,17 @@ class GroupReadyTests(unittest.TestCase):
             self.r.handle({'message': readd})
             self.assertEqual(self.r.store.get_chat_owner_id(cid), 333)
             self.assertEqual(len(self.sent()), 1)
+            outsider = {'id': 777, 'first_name': '普通成员'}
+            self.r.handle({'message': {'message_id': 10, 'chat': chat, 'from': outsider, 'text': '+20'}})
+            self.assertFalse(self.r.store.entries(cid))
+            self.r.handle({'message': {'message_id': 11, 'chat': chat, 'from': frm, 'text': '设置全员'}})
+            self.assertTrue(self.r.store.all_members_can_record(cid))
+            self.r.handle({'message': {'message_id': 12, 'chat': chat, 'from': outsider, 'text': '+20'}})
+            self.assertEqual(self.r.store.entries(cid)[-1].operator_id, 777)
+            self.r.handle({'message': {'message_id': 13, 'chat': chat, 'from': frm, 'text': '取消全员'}})
+            self.assertFalse(self.r.store.all_members_can_record(cid))
+            self.r.handle({'message': {'message_id': 14, 'chat': chat, 'from': outsider, 'text': '+20'}})
+            self.assertEqual(len(self.r.store.entries(cid)), 1)
 
     def test_stranger_join_never_grants_accounting_or_old_binder_privileges(self):
         for cid, kind in ((-10033, 'my_chat_member'), (-10044, 'message')):
@@ -127,9 +140,9 @@ class GroupReadyTests(unittest.TestCase):
         self.assertEqual(len(self.r.store.entries(-10044)), 1)
 
     def test_exact_prompt_and_human_welcome_remain_independent(self):
-        self.assertEqual(C.GROUP_READY_TEXT, '✅️ 记账机器人已就绪。\n\n授权操作人可记账。\n'
+        self.assertEqual(C.GROUP_READY_TEXT, '✅️ 记账机器人已就绪。\n\n默认仅授权人员可记账。\n'
                          '添加操作人：<code>添加操作人 @用户名</code>\n'
-                         '全员记账：<code>设置全员</code>\n使用说明：<code>帮助</code>')
+                         '开启全员请发送：<code>设置全员</code>\n使用说明：<code>帮助</code>')
         self.r.handle({'message': {'message_id': 9, 'chat': {'id': -1001, 'type': 'supergroup'},
                        'from': {'id': 111, 'first_name': '老板'},
                        'new_chat_members': [{'id': 222, 'first_name': '新人', 'is_bot': False}]}})

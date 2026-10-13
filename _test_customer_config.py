@@ -146,6 +146,78 @@ class CustomerTests(unittest.TestCase):
         self.send('设置全员', 557)
         self.assertFalse(self.r.store.all_members_can_record(-10011))
 
+    def test_global_staff_grants_cover_existing_and_future_groups(self):
+        self.grant(555, global_ops=True, groups=[-99999])
+        self.assertEqual(CC.grants(self.bot, 555)['groups'], [])
+        for cid in (-10011, -10022, -10077):
+            mid = self.send('+20', 555, cid)
+            self.assertEqual(self.r.store.entry_for_source_message(cid, mid).operator_id, 555)
+        self.assertFalse(CC.has_staff(self.mgr.find('ledger2'), 555))
+        self.assertFalse(self.r.can_broadcast(555))
+        with self.assertRaises(PermissionError):
+            self.save('features', CC.settings(self.bot)['features'], uid=555)
+        with self.assertRaises(PermissionError):
+            miniapp.action(self.mgr, self.bot, 555, 'staff', dict(user_id=666, add=True))
+
+    def test_staff_grants_do_not_require_a_group_database(self):
+        bot = self.mgr.find('ledger2')
+        for field in ('manage', 'global_ops', 'broadcast'):
+            permissions = dict(manage=False, global_ops=False, broadcast=False, groups=[])
+            permissions[field] = True
+            with patch('miniapp.connect', side_effect=AssertionError('No group lookup needed')):
+                miniapp.action(self.mgr, bot, 333, 'staff',
+                               dict(user_id=555, add=True, grants=permissions))
+            self.assertEqual(CC.grants(bot, 555), permissions)
+        with self.assertRaises(ValueError):
+            self.grant(666)
+        with self.assertRaises(ValueError):
+            self.grant(666, global_ops=True, groups=['-10011'])
+        self.assertFalse(CC.has_staff(self.bot, 666))
+
+    def test_broadcast_select_all_clear_and_permission_boundaries(self):
+        self.grant(557, broadcast=True)
+        for uid in (111, 557):
+            self.r.start_broadcast(C.Actor(uid, '', '测试'), {}, '广播 测试内容')
+            rows = self._bc_rows(uid)
+            self.assertEqual([b['text'] for b in rows[-2]], ['全选', '取消全选'])
+            self.assertEqual([b['text'] for b in rows[-1]], ['下一步', '取消'])
+            self.calls.clear()
+            click = lambda action: self.r.broadcast_callback('cb', uid, 1, 'broadcast:'+action)
+            click('all')
+            self.assertEqual(self.r._bc[uid]['selected'], {-10011, -10022})
+            self.assertTrue(all(row[0]['text'].startswith('√') for row in self._bc_rows(uid)[:-2]))
+            edits = sum(method == 'editMessageReplyMarkup' for method, _ in self.calls)
+            click('all')
+            self.assertEqual(sum(method == 'editMessageReplyMarkup' for method, _ in self.calls), edits)
+            click('toggle:-10011')
+            self.assertEqual(self.r._bc[uid]['selected'], {-10022})
+            click('toggle:-99999')
+            self.assertEqual(self.r._bc[uid]['selected'], {-10022})
+            click('clear')
+            self.assertEqual(self.r._bc[uid]['selected'], set())
+            self.assertTrue(all(row[0]['text'].startswith('□') for row in self._bc_rows(uid)[:-2]))
+            self.assertEqual(self.r._bc[uid]['text'], '测试内容')
+            click('next')
+            self.assertIn('请至少选择一个群', str(self.calls[-1]))
+            click('all')
+            click('next')
+            self.assertIn('broadcast:confirm', str(self.calls[-1]))
+            self.assertFalse(any(method == 'sendMessage' for method, _ in self.calls))
+            click('cancel')
+            click('all')
+            self.assertNotIn(uid, self.r._bc)
+            self.assertIn('菜单已失效', str(self.calls[-1]))
+        self.r.start_broadcast(C.Actor(557, '', '测试'), {}, '广播')
+        miniapp.action(self.mgr, self.bot, 111, 'staff', dict(user_id=557, add=False))
+        self.r.broadcast_callback('cb', 557, 1, 'broadcast:all')
+        self.assertEqual(self.r._bc[557]['selected'], set())
+        self.assertIn('无权限', str(self.calls[-1]))
+        self.r.broadcast_callback('cb', 999, 1, 'broadcast:all')
+        self.assertNotIn(999, self.r._bc)
+
+    def _bc_rows(self, uid):
+        return self.r._broadcast_kb(uid)['inline_keyboard']
+
     def test_defaults_only_affect_new_groups_and_welcome_toggles(self):
         self.r.store.set_rate(-10011,'10')
         old_hour = self.r.store.get_ledger_reset_hour(-10011)
