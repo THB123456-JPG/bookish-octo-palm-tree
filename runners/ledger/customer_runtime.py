@@ -53,6 +53,8 @@ class CustomerRuntime:
         self.r.store.default_currency = (self.r.bot.get('ledger') or {}).get('group_currency', {})
         self.r.store.customer_group_ops = {int(uid): p['groups'] for uid, p in
             (self.r.bot.get('ledger') or {}).get('staff_grants', {}).items()}
+        ids = set(self.r.bot.get('admin_ids') or []) | set(self.r.store.customer_group_ops)
+        self.r.store.customer_staff_ids = {int(uid) for uid in ids if CC.has_staff(self.r.bot, uid)}
         return cfg
 
     def new_group(self, cid):
@@ -63,7 +65,7 @@ class CustomerRuntime:
         st.ensure_chat(cid)
         st.set_ledger_reset_hour(cid, b['cutoff_hour'])
         st.set_ledger_view_mode(cid, b['view_mode'])
-        st.set_all_members_can_record(cid,b['all_members_can_record'])
+        st.set_all_members_can_record(cid,False)
         with getattr(self.r.mgr, 'lock', nullcontext()):
             self.r.bot.setdefault('ledger', {}).setdefault('group_currency', {})[str(cid)] = b['currency']
             self.r.mgr.save()
@@ -114,6 +116,8 @@ class CustomerRuntime:
             self.r.send_html(cid, '⚠️ %s：未下发 %sU，群押金 %sU。' % ('押金风险预警' if stage == 2 else '押金80%提醒', balance, deposit))
 
     def can_record(self, cid, uid):
+        if cid < 0 and self.r.store.all_members_can_record(cid):
+            return True
         p = CC.grants(self.r.bot, uid)
         explicit = str(uid) in (self.r.bot.get('ledger') or {}).get('staff_grants', {})
         if explicit:

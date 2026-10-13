@@ -187,7 +187,7 @@ class LedgerStore:
         self._add_column_if_missing("chat_settings", "fee_percent", "TEXT NOT NULL DEFAULT '0.0000'")
         self._add_column_if_missing("chat_settings", "rate_is_realtime", "INTEGER NOT NULL DEFAULT 0")
         self._add_column_if_missing("chat_settings", "ledger_enabled", "INTEGER NOT NULL DEFAULT 1")
-        self._add_column_if_missing("chat_settings", "all_members_can_record", "INTEGER NOT NULL DEFAULT 1")
+        self._add_column_if_missing("chat_settings", "all_members_can_record", "INTEGER NOT NULL DEFAULT 0")
         self._add_column_if_missing("chat_settings", "ledger_reset_hour", "INTEGER NOT NULL DEFAULT 3")
         self._add_column_if_missing("chat_settings", "ledger_cutoff_enabled", "INTEGER NOT NULL DEFAULT 1")
         self._add_column_if_missing("chat_settings", "ledger_transition_at", "TEXT")
@@ -207,6 +207,13 @@ class LedgerStore:
             "FROM entries WHERE source_message_id IS NOT NULL"
         )
         self.conn.commit()
+        # The old flag was ignored; upgrading must not open any group implicitly.
+        if self.conn.execute('PRAGMA user_version').fetchone()[0] < 1:
+            with self.conn:
+                self.conn.execute('BEGIN IMMEDIATE')
+                if self.conn.execute('PRAGMA user_version').fetchone()[0] < 1:
+                    self.conn.execute('UPDATE chat_settings SET all_members_can_record=0')
+                    self.conn.execute('PRAGMA user_version=1')
 
     def _add_column_if_missing(self, table: str, column: str, definition: str) -> None:
         columns = {row["name"] for row in self.conn.execute(f"PRAGMA table_info({table})")}
@@ -311,8 +318,8 @@ class LedgerStore:
     def ensure_chat(self, chat_id: int) -> None:
         self.conn.execute(
             """
-            INSERT OR IGNORE INTO chat_settings (chat_id, rate, fee_percent, ledger_reset_hour, created_at)
-            VALUES (?, '1.0000', '0.0000', 3, ?)
+            INSERT OR IGNORE INTO chat_settings (chat_id, rate, fee_percent, ledger_reset_hour, all_members_can_record, created_at)
+            VALUES (?, '1.0000', '0.0000', 3, 0, ?)
             """,
             (chat_id, self._now()),
         )

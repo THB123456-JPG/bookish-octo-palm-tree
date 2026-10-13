@@ -104,6 +104,48 @@ class CustomerTests(unittest.TestCase):
         self.assertEqual(count,2)  # original group operator plus explicit single-group grant
         self.assertTrue({555,556,557,558}.issubset({u['user_id'] for u in miniapp.overview(self.mgr,self.bot,111)['permission_users']}))
 
+    def test_owner_and_internal_staff_can_open_only_the_current_group(self):
+        self.grant(555, groups=[-10011])
+        self.grant(556, global_ops=True)
+        self.grant(557, broadcast=True)
+        self.grant(558, manage=True)
+        self.r.store.add_operator(-10011, 559, '', 'Local operator', 111)
+        for uid in (559, 999):
+            self.send('设置全员', uid)
+            self.assertFalse(self.r.store.all_members_can_record(-10011))
+        for uid in (111, 555, 556, 557, 558):
+            self.send('设置全员', uid)
+            self.assertTrue(self.r.store.all_members_can_record(-10011), uid)
+            self.assertFalse(self.r.store.all_members_can_record(-10022))
+            self.send('取消全员', uid)
+            self.assertFalse(self.r.store.all_members_can_record(-10011), uid)
+        self.send('设置全员', 557)
+        group = next(g for g in miniapp.overview(self.mgr,self.bot,111)['groups'] if g['chat_id'] == -10011)
+        self.assertTrue(group['all_members_can_record'])
+        for uid in (999, 558):
+            for text in ('+100', '-10', '下发5', '下发-1', '+10/2'):
+                mid = self.send(text, uid)
+                self.assertEqual(self.r.store.entry_for_source_message(-10011, mid).operator_id, uid)
+            before = len(self.r.store.entries(-10022))
+            self.send('+20', uid, -10022)
+            self.assertEqual(len(self.r.store.entries(-10022)), before)
+            for text in ('设置汇率9', '清空', '下课', '添加操作人 @tester'):
+                self.send(text, uid)
+            self.assertEqual(str(self.r.store.get_settings(-10011)[0]), '1.0000')
+            self.assertTrue(self.r.store.is_ledger_enabled(-10011))
+        self.send('取消全员', 999)
+        self.assertTrue(self.r.store.all_members_can_record(-10011))
+        count = len(self.r.store.entries(-10011))
+        self.assertGreaterEqual(count, 10)
+        self.send('取消全员', 111)
+        self.send('+10', 999)
+        self.assertEqual(len(self.r.store.entries(-10011)), count)
+        self.send('+10', 559)
+        self.assertEqual(len(self.r.store.entries(-10011)), count+1)
+        miniapp.action(self.mgr,self.bot,111,'staff',dict(user_id=557,add=False))
+        self.send('设置全员', 557)
+        self.assertFalse(self.r.store.all_members_can_record(-10011))
+
     def test_defaults_only_affect_new_groups_and_welcome_toggles(self):
         self.r.store.set_rate(-10011,'10')
         old_hour = self.r.store.get_ledger_reset_hour(-10011)

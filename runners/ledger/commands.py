@@ -62,7 +62,7 @@ BLUE_LINK = "https://t.me/"
 GROUP_READY_TEXT = ('✅️ 记账机器人已就绪。\n\n'
                     '授权操作人可记账。\n'
                     '添加操作人：<code>添加操作人 @用户名</code>\n'
-                    '记账仅限授权人员。\n'
+                    '全员记账：<code>设置全员</code>\n'
                     '使用说明：<code>帮助</code>')
 
 
@@ -81,7 +81,8 @@ HELP_TEXT = """【记账】
 
 【权限】
 <code>添加操作人 @aaa @bbb</code>/<code>删除操作人 @aaa @bbb</code>（也可回复人员消息）
-<code>显示操作人</code>｜仅拥有者、内部授权操作人员和本群操作人可记账
+<code>显示操作人</code>｜默认仅拥有者、内部授权操作人员和本群操作人可记账
+<code>设置全员</code>/<code>取消全员</code>｜拥有者或内部成员开关本群全员记账
 
 【其他】
 <code>广播</code>（主人私聊）｜<code>/del</code>清理消息｜<code>通知所有人 内容</code>
@@ -191,16 +192,15 @@ def handle_text(
                                  owner_ids, reply_user)
 
     if normalized in {"设置全员", "取消全员"}:
-        if normalized == '设置全员':
-            return CommandResult('仅拥有者、内部授权操作人员和本群操作人可记账，请先添加操作人。')
         if chat_id >= 0:
             return CommandResult("请在群内设置全员记账权限。")
-        if not _is_owner(actor.user_id, owner_ids):
-            return CommandResult("只有本群老板可以设置全员记账权限。")
+        if not (_is_owner(actor.user_id, owner_ids) or
+                actor.user_id in getattr(store, 'customer_staff_ids', ())):
+            return CommandResult("仅机器人拥有者或内部成员可设置全员记账。")
         enabled = normalized == "设置全员"
         store.set_all_members_can_record(chat_id, enabled)
-        return CommandResult("已设置全员：普通成员可以记账。" if enabled else
-                             "已取消全员：仅老板和本群操作人可以记账。", changed=True)
+        return CommandResult("已开启本群全员记账。" if enabled else
+                             "已关闭本群全员记账，仅授权人员可记账。", changed=True)
 
     if not store.is_ledger_enabled(chat_id):
         return None
@@ -783,7 +783,8 @@ def format_operators(store: LedgerStore, chat_id: int, owner_ids: set[int]) -> s
     lines = ["操作人列表"]
     if owner_ids:
         lines.append("老板：" + ", ".join(str(item) for item in sorted(owner_ids)))
-    lines.append("记账权限：仅拥有者、内部授权操作人员和本群操作人")
+    lines.append("记账权限：全员" if store.all_members_can_record(chat_id) else
+                 "记账权限：仅拥有者、内部授权操作人员和本群操作人")
     if not rows:
         lines.append("暂无操作人。")
         return "\n".join(lines)
@@ -922,7 +923,8 @@ def _can_operate(store: LedgerStore, chat_id: int, user_id: int, owner_ids: set[
 
 
 def _can_record(store: LedgerStore, chat_id: int, user_id: int, owner_ids: set[int]) -> bool:
-    return store.is_operator(chat_id, user_id, owner_ids)
+    return (store.is_operator(chat_id, user_id, owner_ids) or
+            (chat_id < 0 and store.all_members_can_record(chat_id)))
 
 
 def _manage_operators(store: LedgerStore, chat_id: int, actor: Actor, text: str,

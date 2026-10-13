@@ -74,7 +74,7 @@ class PersonnelTests(unittest.TestCase):
                 return handle_text(st, cid, actor, text, {111}, reply_user=reply_user,
                                    message_id=mid, reply_message_id=reply_mid)
 
-            self.assertTrue(st.all_members_can_record(-1001))
+            self.assertFalse(st.all_members_can_record(-1001))
             self.assertFalse(command('+100', actor=outsider).changed)
             self.assertFalse(command('添加操作人 @aaa', actor=outsider).changed)
             self.assertFalse(command('添加操作人 @aaa @unknown').changed)
@@ -88,7 +88,7 @@ class PersonnelTests(unittest.TestCase):
             self.assertIn('&lt;测试成员&gt;', listing)
             self.assertIn('记账权限：仅拥有者', listing)
             self.assertFalse(command('取消全员', actor=aaa).changed)
-            self.assertTrue(st.all_members_can_record(-1001))
+            self.assertFalse(st.all_members_can_record(-1001))
             self.assertTrue(command('取消全员').changed)
             self.assertFalse(st.all_members_can_record(-1001))
             original = st.conn.execute('SELECT * FROM entries ORDER BY id').fetchall()
@@ -102,10 +102,12 @@ class PersonnelTests(unittest.TestCase):
             self.assertTrue(command('+1000/9', actor=aaa).changed)
             self.assertTrue(command('下发10', actor=boss).changed)
             # This flag does not grant configuration or personnel privileges.
-            self.assertFalse(command('设置全员').changed)
+            self.assertTrue(command('设置全员').changed)
+            self.assertIn('记账权限：全员', command('显示操作人').text)
             for text in ('设置汇率 9', '设置费率 10', '清空', '日切4', '下课', '添加操作人 @aaa'):
                 self.assertFalse(command(text, actor=outsider).changed, text)
-            self.assertFalse(command('+1', actor=outsider).changed)
+            self.assertTrue(command('+1', actor=outsider).changed)
+            self.assertFalse(command('+1', actor=outsider, cid=-1002).changed)
             self.assertTrue(command('取消全员').changed)
             self.assertTrue(command('删除操作人 @aaa @bbb').changed)
             self.assertFalse(command('+1', actor=aaa).changed)
@@ -122,22 +124,22 @@ class PersonnelTests(unittest.TestCase):
             self.assertTrue(command('下课').changed)
             self.assertFalse(st.is_ledger_enabled(-1001))
             self.assertTrue(command('添加操作人', reply_user=aaa).changed)
-            self.assertFalse(command('设置全员').changed)
+            self.assertTrue(command('设置全员').changed)
             self.assertIsNone(command('+1', actor=aaa))
             self.assertTrue(command('上课').changed)
             self.assertTrue(st.is_ledger_enabled(-1001))
             self.assertTrue(command('取消全员').changed)
             self.assertTrue(command('+1', actor=aaa).changed)
-            self.assertTrue(st.all_members_can_record(-1002))
+            self.assertFalse(st.all_members_can_record(-1002))
             self.assertTrue(command('取消全员', cid=-1002).changed)
             self.assertFalse(command('+1', actor=aaa, cid=-1002).changed)
-            self.assertFalse(command('设置全员', cid=-1002).changed)
+            self.assertTrue(command('设置全员', cid=-1002).changed)
             self.assertEqual(st.list_operators(-1002), [])
             st.close()
             # Settings survive a restart and are scoped to one group.
             with closing(LedgerStore(Path(folder)/'ledger.sqlite3')) as reopened:
                 self.assertFalse(reopened.all_members_can_record(-1001))
-                self.assertFalse(reopened.all_members_can_record(-1002))
+                self.assertTrue(reopened.all_members_can_record(-1002))
 
     def test_existing_database_defaults_are_preserved(self):
         import sqlite3
@@ -145,16 +147,38 @@ class PersonnelTests(unittest.TestCase):
             path = Path(folder)/'old.sqlite3'
             with closing(sqlite3.connect(path)) as conn:
                 conn.execute('CREATE TABLE chat_settings (chat_id INTEGER PRIMARY KEY, '
-                             'rate TEXT, fee_percent TEXT, owner_id INTEGER, created_at TEXT)')
-                conn.execute("INSERT INTO chat_settings VALUES (-1001,'7.2','3',111,'2026-10-08')")
+                             'rate TEXT, fee_percent TEXT, owner_id INTEGER, created_at TEXT, '
+                             'all_members_can_record INTEGER NOT NULL DEFAULT 1)')
+                conn.execute("INSERT INTO chat_settings VALUES (-1001,'7.2','3',111,'2026-10-08',1)")
                 conn.commit()
             st = LedgerStore(path)
             try:
-                self.assertTrue(st.all_members_can_record(-1001))
+                self.assertFalse(st.all_members_can_record(-1001))
                 self.assertEqual(tuple(st.get_settings(-1001)),
                                  (Decimal('7.2'), Decimal('3')))
+                self.assertFalse(st.all_members_can_record(-1002))
             finally:
                 st.close()
+
+    def test_dormant_legacy_flags_stay_closed_until_explicitly_enabled(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)/'legacy.sqlite3'
+            with closing(LedgerStore(path)) as st:
+                st.set_rate(-1001, '7.2')
+                st.add_operator(-1001, 222, 'staff', 'Staff', 111)
+                st.add_entry(-1001, 'income', '10', 'CNY', 'keep', 111, 'Owner')
+                st.conn.execute('UPDATE chat_settings SET all_members_can_record=1')
+                st.conn.execute('PRAGMA user_version=0')
+                st.conn.commit()
+            with closing(LedgerStore(path)) as st:
+                self.assertFalse(st.all_members_can_record(-1001))
+                self.assertEqual(str(st.get_settings(-1001)[0]), '7.2000')
+                self.assertEqual(len(st.entries(-1001)), 1)
+                self.assertEqual(st.list_operators(-1001)[0]['user_id'], 222)
+                st.set_all_members_can_record(-1001, True)
+            with closing(LedgerStore(path)) as st:
+                self.assertTrue(st.all_members_can_record(-1001))
+                self.assertFalse(st.all_members_can_record(-1002))
 
 
 if __name__ == '__main__':

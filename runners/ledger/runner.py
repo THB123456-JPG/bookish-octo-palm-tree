@@ -776,15 +776,6 @@ class LedgerRunner(BaseRunner):
         # ⑦ 记账主逻辑
         reply = msg.get('reply_to_message') or {}
         if is_group and actor:
-            explicit = str(actor.user_id) in (self.bot.get('ledger') or {}).get('staff_grants', {})
-            if explicit and not self.can_manage(int(chat_id), actor.user_id):
-                try:
-                    entry_text = C._parse_entry(text) is not None or text.startswith('分红')
-                except ValueError:
-                    entry_text = True
-                if entry_text or text in ('撤销', '清空', '/clear', '/undo') or text.startswith('设置'):
-                    self.send_html(chat_id, '你没有这个群的操作权限。')
-                    return
             edit_text = text
             if cfg['features']['pure_u']:
                 if text.startswith(('下发','/下发','/out','/payout','出款','下分')) or re.match(r'\S+/?下发-?\d', text):

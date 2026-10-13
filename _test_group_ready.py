@@ -101,9 +101,10 @@ class GroupReadyTests(unittest.TestCase):
                       'new_chat_members': [{'id': 999, 'is_bot': True}]})
             self.r.handle({kind: event})
             self.assertIsNone(self.r.store.get_chat_owner_id(cid))
-            # Old implicit bindings and the historical all-members flag cannot authorize strangers.
+            # A historical group binding does not authorize this command.
             self.r.store.set_chat_owner(cid, 777, replace=True)
-            self.r.store.set_all_members_can_record(cid, True)
+            self.r.handle({'message': {'message_id': 101, 'chat': chat, 'from': user, 'text': '设置全员'}})
+            self.assertFalse(self.r.store.all_members_can_record(cid))
             for mid, text in enumerate(('+100', '-10', '下发5', '设置汇率9', '添加操作人 @who'), 2):
                 self.r.handle({'message': {'message_id': mid, 'chat': chat, 'from': user, 'text': text}})
             self.assertFalse(self.r.store.entries(cid))
@@ -128,7 +129,7 @@ class GroupReadyTests(unittest.TestCase):
     def test_exact_prompt_and_human_welcome_remain_independent(self):
         self.assertEqual(C.GROUP_READY_TEXT, '✅️ 记账机器人已就绪。\n\n授权操作人可记账。\n'
                          '添加操作人：<code>添加操作人 @用户名</code>\n'
-                         '记账仅限授权人员。\n使用说明：<code>帮助</code>')
+                         '全员记账：<code>设置全员</code>\n使用说明：<code>帮助</code>')
         self.r.handle({'message': {'message_id': 9, 'chat': {'id': -1001, 'type': 'supergroup'},
                        'from': {'id': 111, 'first_name': '老板'},
                        'new_chat_members': [{'id': 222, 'first_name': '新人', 'is_bot': False}]}})
