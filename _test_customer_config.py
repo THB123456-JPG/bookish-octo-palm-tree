@@ -218,6 +218,137 @@ class CustomerTests(unittest.TestCase):
     def _bc_rows(self, uid):
         return self.r._broadcast_kb(uid)['inline_keyboard']
 
+    def _broadcast_message(self, uid=111, **content):
+        self.mid += 1
+        self.r.handle({'message': dict(message_id=self.mid, chat=dict(id=uid, type='private'),
+            **{'from': dict(id=uid, first_name='测试')}, **content)})
+
+    def _broadcast_begin(self, uid=111):
+        self._broadcast_message(uid, text='广播')
+        self.r.broadcast_callback('cb', uid, 1, 'broadcast:toggle:-10011')
+        self.r.broadcast_callback('cb', uid, 1, 'broadcast:next')
+        self.calls.clear()
+
+    def test_broadcast_text_photo_and_caption_require_confirmation_and_send_once(self):
+        photo = [dict(file_id='FAKE_SMALL', width=100), dict(file_id='FAKE_PHOTO', width=800)]
+        for content in (dict(text='文字 <原样>'), dict(photo=photo),
+                        dict(photo=photo, caption='广播 活动 <原样>'),
+                        dict(photo=photo, caption='+100'), dict(photo=photo, caption='取消')):
+            with self.subTest(content=content):
+                self._broadcast_begin()
+                before = len(self.r.store.entries(111))
+                self._broadcast_message(**content)
+                self.assertFalse(self.r._bc[111]['waiting'])
+                self.assertEqual(len(self.r.store.entries(111)), before)
+                self.assertFalse(any(kw.get('chat_id', 0) < 0 for _, kw in self.calls))
+                self.assertIn('broadcast:confirm', str(self.calls[-1]))
+                caption = content.get('caption', content.get('text', ''))
+                previews = [kw for method, kw in self.calls if method == 'sendPhoto']
+                self.assertEqual(previews, [dict(chat_id=111, photo='FAKE_PHOTO', caption=caption)]
+                                 if 'photo' in content else [])
+                with patch('runners.ledger.runner.threading.Thread') as worker:
+                    self.r.broadcast_callback('cb', 111, 2, 'broadcast:confirm')
+                    self.r.broadcast_callback('cb', 111, 2, 'broadcast:confirm')
+                    worker.assert_called_once()
+                    worker.return_value.start.assert_called_once()
+                    args = worker.call_args.kwargs['args']
+                self.calls.clear()
+                with patch('runners.ledger.runner.time.sleep'):
+                    self.r._run_broadcast(*args)
+                sent = [(method, kw) for method, kw in self.calls if kw.get('chat_id', 0) < 0]
+                expected = ('sendPhoto', dict(chat_id=-10011, photo='FAKE_PHOTO', caption=caption)) if 'photo' in content else (
+                    'sendMessage', dict(chat_id=-10011, text=caption))
+                self.assertEqual(sent, [expected])
+                self.assertIn('成功：1\n失败：0', self.calls[-1][1]['text'])
+
+    def test_broadcast_rejects_unsupported_album_and_long_caption_then_can_cancel(self):
+        photo = [dict(file_id='FAKE_PHOTO', width=800)]
+        for content in (dict(document={'file_id': 'FAKE_FILE'}, caption='文件'),
+                        dict(video={'file_id': 'FAKE_VIDEO'}, caption='广播 视频'),
+                        dict(sticker={'file_id': 'FAKE_STICKER'}),
+                        dict(photo=photo, media_group_id='FAKE_ALBUM'),
+                        dict(photo=photo, caption='字'*1025)):
+            with self.subTest(content=content):
+                self._broadcast_begin()
+                self._broadcast_message(**content)
+                self.assertTrue(self.r._bc[111]['waiting'])
+                self.assertFalse(any(method == 'sendPhoto' for method, _ in self.calls))
+                with patch('runners.ledger.runner.threading.Thread') as worker:
+                    self.r.broadcast_callback('cb', 111, 2, 'broadcast:confirm')
+                    worker.assert_not_called()
+                self._broadcast_message(photo=photo, caption='字'*1024)
+                self.assertFalse(self.r._bc[111]['waiting'])
+                self.r.broadcast_callback('cb', 111, 2, 'broadcast:cancel')
+                self.assertNotIn(111, self.r._bc)
+                self.assertFalse(any(kw.get('chat_id', 0) < 0 for _, kw in self.calls))
+        self._broadcast_begin()
+        self._broadcast_message(text='取消')
+        self.assertNotIn(111, self.r._bc)
+
+    def test_broadcast_inline_photo_is_preserved(self):
+        photo = [dict(file_id='FAKE_PHOTO', width=800)]
+        self._broadcast_message(photo=photo, caption='广播 图文通知')
+        self.r.broadcast_callback('cb', 111, 1, 'broadcast:all')
+        self.calls.clear()
+        self.r.broadcast_callback('cb', 111, 1, 'broadcast:next')
+        self.assertEqual([kw for method, kw in self.calls if method == 'sendPhoto'],
+                         [dict(chat_id=111, photo='FAKE_PHOTO', caption='图文通知')])
+        self.assertFalse(any(kw.get('chat_id', 0) < 0 for _, kw in self.calls))
+
+    def test_broadcast_photo_revocation_and_inactive_group_are_respected(self):
+        photo = [dict(file_id='FAKE_PHOTO', width=800)]
+        for before_input in (True, False):
+            self.grant(557, broadcast=True)
+            self._broadcast_begin(557)
+            if not before_input:
+                self._broadcast_message(557, photo=photo, caption='通知')
+            miniapp.action(self.mgr, self.bot, 111, 'staff', dict(user_id=557, add=False))
+            self.calls.clear()
+            if before_input:
+                self._broadcast_message(557, photo=photo, caption='通知')
+                self.assertNotIn(557, self.r._bc)
+            with patch('runners.ledger.runner.threading.Thread') as worker:
+                self.r.broadcast_callback('cb', 557, 2, 'broadcast:confirm')
+                worker.assert_not_called()
+            self.assertFalse(any(method == 'sendPhoto' for method, _ in self.calls))
+        self._broadcast_begin()
+        self._broadcast_message(photo=photo)
+        self.r.store.deactivate_bot_chat(-10011)
+        with patch('runners.ledger.runner.threading.Thread') as worker:
+            self.r.broadcast_callback('cb', 111, 2, 'broadcast:confirm')
+            worker.assert_not_called()
+        self.assertIn('群列表已更新', str(self.calls[-1]))
+        self.calls.clear()
+        with patch('runners.ledger.runner.time.sleep'):
+            self.r._run_broadcast(111, 2, [-10011, -10022], '通知', 'FAKE_PHOTO')
+        self.assertEqual([kw['chat_id'] for method, kw in self.calls if method == 'sendPhoto'], [-10022])
+
+    def test_broadcast_photo_failures_do_not_fall_back_to_text_or_report_success(self):
+        photo = [dict(file_id='FAKE_PHOTO', width=800)]
+        for failure in (core.TgError('fake photo error'), None):
+            self._broadcast_begin()
+            def fail_photo(method, **kw):
+                if method == 'sendPhoto' and kw['chat_id'] in (111, -10011):
+                    if failure:
+                        raise failure
+                    return None
+                return self.call(method, **kw)
+            with patch.object(self.r.api, 'call', side_effect=fail_photo):
+                self._broadcast_message(photo=photo, caption='通知')
+                self.assertTrue(self.r._bc[111]['waiting'])
+                self.assertIn('图片预览失败', self.calls[-1][1]['text'])
+                with patch('runners.ledger.runner.threading.Thread') as worker:
+                    self.r.broadcast_callback('cb', 111, 2, 'broadcast:confirm')
+                    worker.assert_not_called()
+                self.calls.clear()
+                with patch('runners.ledger.runner.time.sleep'):
+                    self.r._run_broadcast(111, 2, [-10011, -10022], '通知', 'FAKE_PHOTO')
+                self.assertEqual([kw['chat_id'] for method, kw in self.calls if method == 'sendPhoto'], [-10022])
+                self.assertFalse(any(method == 'sendMessage' and kw.get('chat_id', 0) < 0 for method, kw in self.calls))
+                self.assertIn('成功：1\n失败：1', self.calls[-1][1]['text'])
+            self._broadcast_message(photo=photo, caption='重试')
+            self.assertFalse(self.r._bc[111]['waiting'])
+
     def test_defaults_only_affect_new_groups_and_welcome_toggles(self):
         self.r.store.set_rate(-10011,'10')
         old_hour = self.r.store.get_ledger_reset_hour(-10011)

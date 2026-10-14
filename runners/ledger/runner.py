@@ -534,17 +534,14 @@ class LedgerRunner(BaseRunner):
 
         text = (msg.get('text') or msg.get('caption') or '').strip()
         if not text:
-            # ★ 主人正在设欢迎语时发来的**纯图片**（没带说明文字）——
-            #   这种消息没有 text，得在这里单独接住，否则永远走不到下面。
-            #   ★ 只有私聊才管：群里别人发的图一概不碰
-            #     （不能谁发张图就改了欢迎图）。没在等他输入的私聊
-            #     媒体消息（贴纸/语音…）welcome_input 会直接返回 False，
-            #     行为跟以前一样 —— 一概不理。
+            # 私聊的纯图片也要交给正在等待内容的欢迎语或广播流程。
             if chat.get('type') == 'private' and not frm.get('is_bot'):
                 try:
-                    self.welcome_input(self.actor_of(frm), msg, '')
+                    actor = self.actor_of(frm)
+                    if not self.welcome_input(actor, msg, ''):
+                        self.broadcast_input(actor, msg, '')
                 except Exception as e:
-                    log('[%s] 处理欢迎图失败：%s' % (self.note(), e))
+                    log('[%s] 处理私聊图片失败：%s' % (self.note(), e))
             return
         try:
             self._dispatch(chat_id, chat, msg, frm, text)
@@ -667,6 +664,8 @@ class LedgerRunner(BaseRunner):
             #     就会被下面那条吃掉，跑去开广播菜单了）
             if self.welcome_input(actor, msg, cmd):
                 return
+            if (msg.get('photo') or 'caption' in msg) and self.broadcast_input(actor, msg, text):
+                return      # 图片说明中的命令也是广播内容
             if cmd in ('/del', 'del', '/清理', '清理消息'):
                 self.start_cleanup_menu(actor, msg)
                 return
@@ -1616,6 +1615,9 @@ class LedgerRunner(BaseRunner):
         if not self.can_broadcast(uid):
             self.send_html(uid, '只有机器人主人可以广播。')
             return
+        if msg.get('media_group_id'):
+            self.send_html(uid, '广播请发送单张图片，不要合并为相册。')
+            return
         try:
             groups = [dict(r) for r in self.store.list_active_bot_groups()]
         except Exception as e:
@@ -1626,7 +1628,7 @@ class LedgerRunner(BaseRunner):
                                 '并让群里产生一条消息。')
             return
         self._bc[uid] = {'groups': groups, 'selected': set(), 'waiting': False,
-                         'text': '', 'at': time.time()}
+                         'text': '', 'photo': self._biggest_photo(msg), 'at': time.time()}
         # 「广播 内容」可以一句话带内容，省一步
         inline = G.extract_broadcast_text(cmd_text, '广播')
         if inline:
@@ -1653,7 +1655,11 @@ class LedgerRunner(BaseRunner):
         if not st or not st.get('waiting'):
             return False
         uid = actor.user_id
-        if text.strip() in ('取消', '取消广播', '/broadcast_cancel'):
+        if not self.can_broadcast(uid):
+            self._bc.pop(uid, None)
+            self.send_html(uid, '你没有广播权限。')
+            return True
+        if msg.get('text') and text.strip() in ('取消', '取消广播', '/broadcast_cancel'):
             self._bc.pop(uid, None)
             self.send_html(uid, '已取消广播。')
             return True
@@ -1661,17 +1667,34 @@ class LedgerRunner(BaseRunner):
             self._bc.pop(uid, None)
             self.send_html(uid, '没有选择群，请重新发送「广播」。')
             return True
+        photo = self._biggest_photo(msg)
+        if msg.get('media_group_id') or not photo and not msg.get('text'):
+            self.send_html(uid, '请发送文字或单张图片；图片可添加说明文字，请勿合并为相册或作为文件发送。')
+            return True
         st['text'] = text
+        st['photo'] = photo
+        self._confirm_broadcast(uid)
+        return True
+
+    def _confirm_broadcast(self, uid, mid=None):
+        st = self._bc[uid]
+        if st.get('photo'):
+            st['waiting'] = True
+            if len(st['text']) > 1024:
+                self.send_html(uid, '图片说明文字最多 1024 字符，请缩短后重新发送图片。')
+                return
+            try:
+                if not self.api.call('sendPhoto', chat_id=uid, photo=st['photo'], caption=st['text']):
+                    raise TgError('发送接口未返回结果')
+            except TgError:
+                self.send_html(uid, '图片预览失败，请重新发送图片；尚未向群组广播。')
+                return
         st['waiting'] = False
         st['at'] = time.time()
-        titles = self._broadcast_titles(uid)
-        self.send_html(uid,
-                       '广播目标：\n%s\n\n广播内容：\n%s'
-                       % (titles, C.escape(text)),
+        self.edit_html(uid, mid, self._broadcast_preview(uid),
                        kb={'inline_keyboard': [[
                            {'text': '确认发送', 'callback_data': 'broadcast:confirm'},
                            {'text': '取消', 'callback_data': 'broadcast:cancel'}]]})
-        return True
 
     def _broadcast_titles(self, uid):
         st = self._bc.get(uid) or {}
@@ -1697,23 +1720,17 @@ class LedgerRunner(BaseRunner):
                 self._answer(cb_id, '请至少选择一个群')
                 return
             st['at'] = time.time()
-            if st.get('text'):
+            if st.get('text') or st.get('photo'):
                 # 内容已经带了（「广播 内容」那种），跳过输入直接给确认
-                st['waiting'] = False
                 self._answer(cb_id, '')
-                self.edit_html(uid, mid, self._broadcast_preview(uid),
-                               kb={'inline_keyboard': [[
-                                   {'text': '确认发送',
-                                    'callback_data': 'broadcast:confirm'},
-                                   {'text': '取消',
-                                    'callback_data': 'broadcast:cancel'}]]})
+                self._confirm_broadcast(uid, mid)
                 return
             st['waiting'] = True
             self._answer(cb_id, '')
-            self.edit_html(uid, mid, '请输入要广播的内容。')
+            self.edit_html(uid, mid, '请发送要广播的文字或单张图片。\n图文一起发送：选择图片，在图片说明中填写文字（最多 1024 字符）。\n发送后先预览，再点击「确认发送」。')
             return
         if data == 'broadcast:confirm':
-            if not st or not st['selected'] or not st.get('text'):
+            if not st or st.get('waiting') or not st['selected'] or not (st.get('text') or st.get('photo')):
                 self._answer(cb_id, '广播任务已失效，请重新发送「广播」')
                 return
             # 群列表可能已经变了（被踢了），确认一下
@@ -1727,11 +1744,12 @@ class LedgerRunner(BaseRunner):
                 self.edit_html(uid, mid, '群列表已更新，请重新发送「广播」选择目标群。')
                 return
             targets, content = sorted(st['selected']), st['text']
+            photo = st.get('photo') or ''
             self._bc.pop(uid, None)
             self._answer(cb_id, '开始广播')
             self.edit_html(uid, mid, '正在广播，请稍候……')
             threading.Thread(target=self._run_broadcast,
-                             args=(uid, mid, targets, content),
+                             args=(uid, mid, targets, content, photo),
                              daemon=True, name='ledger-bc').start()
             return
         if data in ('broadcast:all', 'broadcast:clear') or data.startswith('broadcast:toggle:'):
@@ -1770,9 +1788,10 @@ class LedgerRunner(BaseRunner):
     def _broadcast_preview(self, uid):
         st = self._bc.get(uid) or {}
         return ('广播目标：\n%s\n\n广播内容：\n%s'
-                % (self._broadcast_titles(uid), C.escape(st.get('text') or '')))
+                % (self._broadcast_titles(uid),
+                   ('[图片]\n' if st.get('photo') else '') + C.escape(st.get('text') or '')))
 
-    def _run_broadcast(self, uid, mid, targets, content):
+    def _run_broadcast(self, uid, mid, targets, content, photo=''):
         started = time.time()
         ok = fail = 0
         for cid in targets:
@@ -1783,7 +1802,10 @@ class LedgerRunner(BaseRunner):
             if not active:
                 continue
             try:
-                self.api.call('sendMessage', chat_id=cid, text=content)
+                result = (self.api.call('sendPhoto', chat_id=cid, photo=photo, caption=content) if photo
+                          else self.api.call('sendMessage', chat_id=cid, text=content))
+                if not result:
+                    raise TgError('发送接口未返回结果')
                 ok += 1
             except TgError as e:
                 log('[%s] 广播到 %s 失败：%s' % (self.note(), cid, e))
