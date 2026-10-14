@@ -676,6 +676,41 @@ def action(mgr, bot, uid, name, payload):
         return tron_action(mgr, bot, uid, name, payload)
     if name in ('bills','statistics') and bot['type']=='ledger':
         return bill_query(bot,uid,payload) if name=='bills' else statistics(bot,uid,payload)
+    if name in ('deletebills', 'deletebill') and bot['type'] == 'ledger':
+        cid = number(payload.get('chat_id'), -2**52+1, -1, integer=True)
+        period = None
+        if name == 'deletebill':
+            period = text(payload.get('period'), 64)
+            try:
+                datetime.fromisoformat(period)
+            except ValueError:
+                raise ValueError('账期无效，请重新打开账单') from None
+        if payload.get('confirm') is not True:
+            raise ValueError('请确认删除该账期的账单记录' if period else '请确认删除该群全部账期的账单记录')
+        if not ledger_path(bot).exists():
+            raise PermissionError('没有该群账单权限')
+        from runners.ledger.storage import LedgerStore
+        with mgr.lock, closing(LedgerStore(ledger_path(bot), initialize=False)) as st:
+            with st.conn:
+                st.conn.execute('BEGIN IMMEDIATE')
+                if cid not in {g['chat_id'] for g in groups(st.conn, bot, uid)}:
+                    raise PermissionError('没有该群账单删除权限')
+                tables = {r[0] for r in st.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                deleted = 0
+                # Keep message receipts: replaying an old update must not recreate deleted entries.
+                for table, column in (('entries', 'accounting_date'), ('customer_month_entries', 'accounting_date'),
+                                      ('customer_opening_balances', 'period'), ('customer_bill_archives', None),
+                                      ('ledger_cutoff_reminders', 'accounting_date')):
+                    # Whole-group archive snapshots cannot be split by accounting period.
+                    if table in tables and (period is None or column):
+                        condition = 'chat_id=?' + (' AND '+column+'=?' if period is not None else '')
+                        params = (cid, period) if period is not None else (cid,)
+                        count = st.conn.execute('DELETE FROM '+table+' WHERE '+condition, params).rowcount
+                        if table in ('entries', 'customer_month_entries'):
+                            deleted += count
+                if deleted:
+                    st.mark_history()
+        return dict(deleted=deleted)
     if name == 'pricing' and bot['type']=='ledger':
         cid=number(payload.get('chat_id'),-2**52+1,-1,integer=True)
         target=number(payload.get('user_id'),1,2**52-1,integer=True)

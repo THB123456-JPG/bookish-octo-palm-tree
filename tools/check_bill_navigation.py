@@ -64,7 +64,7 @@ with sync_playwright() as p:
     expect(page.locator('#bill_search')).to_have_value('有权限')
     expect(page.locator('[data-bill-group]')).to_have_count(1)
     page.get_by_role('button', name='统计', exact=True).click()
-    expect(page.locator('[data-stats-group]')).to_have_count(2)
+    expect(page.locator('[data-stats-group]')).to_have_count(1)
     group = page.locator('[data-stats-group="-10011"]')
     expect(group).not_to_contain_text('›')
     group.locator('small').click()
@@ -79,10 +79,12 @@ with sync_playwright() as p:
     page.evaluate('void telegramBack()')
     expect(page.locator('header h1')).to_have_text('统计')
     expect(page.locator('#stats_group')).to_have_value('')
-    page.locator('[data-stats-group="-10022"]').click()
-    expect(page.locator('header h1')).to_have_text('群组统计')
-    expect(page.get_by_text('所选日期范围暂无流水。')).to_be_visible()
-    page.locator('#back').click()
+    page.locator('#stats_group').select_option('-10022')
+    page.locator('#statsQuery').click()
+    expect(page.locator('[data-stats-group]')).to_have_count(0)
+    page.locator('#stats_group').select_option('')
+    page.locator('#statsQuery').click()
+    expect(page.locator('[data-stats-group]')).to_have_count(1)
     for width in (390, 320):
         page.set_viewport_size(dict(width=width, height=844))
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
@@ -90,4 +92,4 @@ with sync_playwright() as p:
     assert not errors, errors
     browser.close()
     print('Bills: one row per group, separate periods, nested back and search retained. '
-          'Statistics: whole-row detail, zero-record group, back and mobile widths passed.')
+          'Statistics: whole-row detail, empty groups hidden, back and mobile widths passed.')

@@ -907,6 +907,7 @@ function _setLS(k, v){
 
 function startUI(d){
   if(!d || !d.ok) return;
+  panelTrail.length = 0;
   document.getElementById('mask').style.display='none';
   document.getElementById('main').style.display='block';
   // ★ 换了个人登录，setHTML 的「上次画过什么」缓存必须清掉，
@@ -2003,6 +2004,7 @@ document.addEventListener('click', function(e){
    ================================================================== */
 var TABS = ['msg', 'bots', 'add', 'merch', 'help', 'logs', 'appearance', 'server'];
 var CUR_TAB = 'msg';
+var panelTrail = [];
 
 var SERVER_BUSY=false,NODE_STATE=null,NODE_LOADING=null,NODE_UPDATED=0,NODE_LOCAL=null;
 function nodeDate(value){return value?new Date(value*1000+28800000).toISOString().slice(0,16):'';}
@@ -2104,6 +2106,7 @@ async function saveAppearance(event){
 }
 function switchTab(name, skipSave){
   if(TABS.indexOf(name) < 0) name = 'msg';
+  if(!skipSave && CUR_TAB !== name) panelTrail.push({tab:CUR_TAB, scroll:window.scrollY});
   if(CUR_TAB !== name) MSG.VERSION++;
   CUR_TAB = name;
   TABS.forEach(function(t){
@@ -3267,6 +3270,56 @@ function msgGoto(level, skipLoad){
   // 三级都要实时 —— 未读数字、新群、新消息都得自己冒出来
   msgStartLive();
 }
+
+function panelBack(){
+  var modal = Array.from(document.querySelectorAll('[id$="Modal"],#homeTip'))
+    .filter(function(el){return el.getClientRects().length;})
+    .sort(function(a,b){return (Number(getComputedStyle(b).zIndex)||0)-(Number(getComputedStyle(a).zIndex)||0);})[0];
+  if(modal){
+    var close = modal.querySelector('button[onclick^="close"]');
+    if(!close || close.disabled || !close.getClientRects().length) return;
+    if(modal.querySelector('input,textarea,select') && !confirm('关闭当前窗口？尚未保存的修改将丢失。')) return;
+    close.click(); return;
+  }
+  if(!document.getElementById('main').getClientRects().length) return;
+  if(CUR_TAB === 'msg' && MSG.LEVEL > 1){
+    var members = document.getElementById('memBox');
+    if(MSG.LEVEL === 3 && members.getClientRects().length){msgToggleMembers();return;}
+    msgGoto(MSG.LEVEL - 1); return;
+  }
+  var previous = panelTrail.pop();
+  if(previous){switchTab(previous.tab, true);window.scrollTo(0, previous.scroll);}
+}
+
+// Touch-only back gesture; leave vertical scrolling and horizontal controls native.
+(function(){
+  var start = null;
+  document.addEventListener('touchstart', function(e){
+    start = null;
+    if(e.touches.length !== 1 || e.target.closest('input,textarea,select,[contenteditable],audio,video') || String(window.getSelection())) return;
+    for(var el=e.target;el && el!==document.body;el=el.parentElement){
+      if(el.scrollWidth > el.clientWidth+1 && /auto|scroll/.test(getComputedStyle(el).overflowX)) return;
+    }
+    var t=e.touches[0];start={x:t.clientX,y:t.clientY,time:Date.now(),locked:false};
+  }, {passive:true});
+  document.addEventListener('touchmove', function(e){
+    if(!start) return;
+    if(e.touches.length !== 1){start=null;return;}
+    var dx=e.touches[0].clientX-start.x,dy=Math.abs(e.touches[0].clientY-start.y);
+    if(!start.locked){
+      if(dy>12 || dx < -12){start=null;return;}
+      if(dx>12 && dx>dy*2) start.locked=true;
+    }
+    if(start.locked && e.cancelable) e.preventDefault();
+  }, {passive:false});
+  document.addEventListener('touchend', function(e){
+    var s=start;start=null;if(!s || !s.locked) return;
+    if(e.cancelable) e.preventDefault();
+    var t=e.changedTouches[0],dx=t.clientX-s.x,dy=Math.abs(t.clientY-s.y);
+    if(dx>=80 && dx>dy*2 && Date.now()-s.time<1000) panelBack();
+  }, {passive:false});
+  document.addEventListener('touchcancel', function(){start=null;}, {passive:true});
+})();
 
 </script>
 </body>

@@ -543,6 +543,133 @@ class CustomerTests(unittest.TestCase):
         self.assertEqual(self.r.customer.addresses(-10011),[a])
         self.assertEqual(self.r.customer.addresses(-10022),[a])
 
+    def test_delete_bills_clears_all_periods_only_for_selected_group(self):
+        st = self.r.store
+        st.customer_options = {'archive_bill': True}
+        st.add_entry(-10022, 'income', '20', 'U', '', 111, '老板')
+        for cid in (-10011, -10022):
+            st.clear_entries(cid)
+            st.add_entry(cid, 'income', '7', 'U', '', 111, '老板', source_message_id=901)
+            st.add_entry(cid, 'payout', '3', 'U', '', 111, '老板')
+        voided = st.add_entry(-10011, 'income', '1', 'U', '', 111, '老板')
+        st.void_entry(-10011, voided.id)
+        with st.conn:
+            st.conn.execute("UPDATE entries SET created_at='2000-01-01T00:00:00+00:00', accounting_date='2000-01-01' WHERE source_message_id=901")
+            st.conn.execute('CREATE TABLE IF NOT EXISTS customer_opening_balances(chat_id INTEGER, period TEXT, balance TEXT, PRIMARY KEY(chat_id,period))')
+            for cid in (-10011, -10022):
+                st.conn.execute('INSERT INTO customer_opening_balances VALUES(?,?,?)', (cid, '2000-01-01', '9'))
+                st.conn.execute('INSERT INTO ledger_cutoff_reminders(chat_id,accounting_date,cutoff_at,balance_usdt,status) VALUES(?,?,?,?,?)',
+                                (cid, '2000-01-01', '2000-01-02', '-9', 'sent'))
+        tables = ('entries', 'customer_month_entries', 'customer_opening_balances',
+                  'customer_bill_archives', 'ledger_cutoff_reminders')
+        other = {t: [tuple(r) for r in st.conn.execute('SELECT * FROM '+t+' WHERE chat_id=-10022')] for t in tables}
+        kept = ('chat_settings', 'operators', 'user_pricing', 'bot_chats', 'ledger_entry_messages')
+        settings = {t: [tuple(r) for r in st.conn.execute('SELECT * FROM '+t)] for t in kept}
+        self.calls.clear()
+        result = miniapp.action(self.mgr, self.bot, 111, 'deletebills', dict(chat_id=-10011, confirm=True))
+        self.assertEqual(result, {'deleted': 4})
+        for table in tables:
+            self.assertEqual(st.conn.execute('SELECT COUNT(*) FROM '+table+' WHERE chat_id=-10011').fetchone()[0], 0)
+            self.assertEqual([tuple(r) for r in st.conn.execute('SELECT * FROM '+table+' WHERE chat_id=-10022')], other[table])
+        for table in kept:
+            self.assertEqual([tuple(r) for r in st.conn.execute('SELECT * FROM '+table)], settings[table])
+        self.assertEqual(miniapp.bill_query(self.bot, 111, dict(chat_id=-10011))['bills'], [])
+        self.assertEqual(miniapp.statistics(self.bot, 111, dict(chat_id=-10011))['summary'], miniapp.monetary([]))
+        self.assertIsNone(st.add_entry(-10011, 'income', '7', 'U', '', 111, '老板', source_message_id=901))
+        self.assertEqual(self.calls, [])
+
+    def test_delete_bill_removes_only_exact_period_including_cleared_rows(self):
+        st = self.r.store
+        day = miniapp.month_bounds()[0]
+        period = day + 'T00:00:00+08:00'
+        st.customer_options = {'archive_bill': True}
+        with st.conn:
+            st.conn.execute('UPDATE entries SET accounting_date=? WHERE chat_id=-10011', (period,))
+        other = st.add_entry(-10011, 'income', '9', 'U', '其他账期', 111, '老板')
+        with st.conn:
+            st.conn.execute('UPDATE entries SET accounting_date=? WHERE id=?', (day, other.id))
+        st.clear_entries(-10011)
+        active = st.add_entry(-10011, 'income', '7', 'U', '', 111, '老板', source_message_id=902)
+        voided = st.add_entry(-10011, 'payout', '1', 'U', '', 111, '老板')
+        st.void_entry(-10011, voided.id)
+        other_group = st.add_entry(-10022, 'income', '8', 'U', '', 111, '老板')
+        with st.conn:
+            st.conn.execute('UPDATE entries SET accounting_date=? WHERE id IN (?,?,?)', (period, active.id, voided.id, other_group.id))
+            st.conn.execute('CREATE TABLE IF NOT EXISTS customer_opening_balances(chat_id INTEGER, period TEXT, balance TEXT, PRIMARY KEY(chat_id,period))')
+            for cid, key in ((-10011, period), (-10011, day), (-10022, period)):
+                st.conn.execute('INSERT INTO customer_opening_balances VALUES(?,?,?)', (cid, key, '9'))
+                st.conn.execute('INSERT INTO ledger_cutoff_reminders(chat_id,accounting_date,cutoff_at,balance_usdt,status) VALUES(?,?,?,?,?)',
+                                (cid, key, day, '-9', 'sent'))
+        columns = {'entries': 'accounting_date', 'customer_month_entries': 'accounting_date',
+                   'customer_opening_balances': 'period', 'ledger_cutoff_reminders': 'accounting_date'}
+        retained = {table: [tuple(r) for r in st.conn.execute(
+            'SELECT * FROM '+table+' WHERE NOT (chat_id=? AND '+column+'=?)', (-10011, period))]
+            for table, column in columns.items()}
+        archives = [tuple(r) for r in st.conn.execute('SELECT * FROM customer_bill_archives')]
+        result = miniapp.action(self.mgr, self.bot, 111, 'deletebill', dict(chat_id=-10011, period=period, confirm=True))
+        self.assertEqual(result, {'deleted': 3})
+        for table, rows in retained.items():
+            self.assertEqual([tuple(r) for r in st.conn.execute('SELECT * FROM '+table)], rows)
+        self.assertEqual([tuple(r) for r in st.conn.execute('SELECT * FROM customer_bill_archives')], archives)
+        self.assertEqual([b['period'] for b in miniapp.bill_query(self.bot, 111, dict(chat_id=-10011))['bills']], [day])
+        self.assertIsNone(st.add_entry(-10011, 'income', '7', 'U', '', 111, '老板', source_message_id=902))
+
+    def test_delete_bill_requires_period_confirmation_and_group_permission(self):
+        st = self.r.store
+        period = st.entries(-10011)[0].accounting_date
+        before = [tuple(r) for r in st.conn.execute('SELECT * FROM entries')]
+        for invalid in (None, '', 'all', '2026-99-99', ['2026-10-01']):
+            with self.subTest(period=invalid), self.assertRaises(ValueError):
+                miniapp.action(self.mgr, self.bot, 111, 'deletebill', dict(chat_id=-10011, period=invalid, confirm=True))
+        with self.assertRaises(ValueError):
+            miniapp.action(self.mgr, self.bot, 111, 'deletebill', dict(chat_id=-10011, period=period))
+        for uid, cid in ((999, -10011), (222, -10022)):
+            with self.assertRaises(PermissionError):
+                miniapp.action(self.mgr, self.bot, uid, 'deletebill', dict(chat_id=cid, period=period, confirm=True))
+        self.assertEqual([tuple(r) for r in st.conn.execute('SELECT * FROM entries')], before)
+        self.assertEqual(miniapp.action(self.mgr, self.bot, 222, 'deletebill', dict(chat_id=-10011, period=period, confirm=True)), {'deleted': 1})
+
+    def test_delete_bills_requires_confirmation_and_current_group_permission(self):
+        st = self.r.store
+        self.grant(555, manage=True)
+        self.grant(556, global_ops=True)
+        self.grant(558, broadcast=True)
+        before = [tuple(r) for r in st.conn.execute('SELECT * FROM entries')]
+        for confirm in (None, False, 1, 'true'):
+            with self.subTest(confirm=confirm), self.assertRaises(ValueError):
+                miniapp.action(self.mgr, self.bot, 111, 'deletebills', dict(chat_id=-10011, confirm=confirm))
+        for cid in (None, '', 0, True, -1.5):
+            with self.subTest(cid=cid), self.assertRaises(ValueError):
+                miniapp.action(self.mgr, self.bot, 111, 'deletebills', dict(chat_id=cid, confirm=True))
+        for uid, cid in ((999, -10011), (555, -10011), (558, -10011), (222, -10022), (111, -99999)):
+            with self.subTest(uid=uid, cid=cid), self.assertRaises(PermissionError):
+                miniapp.action(self.mgr, self.bot, uid, 'deletebills', dict(chat_id=cid, confirm=True))
+        with self.assertRaises(PermissionError):
+            miniapp.action(self.mgr, self.mgr.find('ledger2'), 111, 'deletebills', dict(chat_id=-10011, confirm=True))
+        self.assertFalse(miniapp.ledger_path(self.mgr.find('ledger2')).exists())
+        self.assertEqual([tuple(r) for r in st.conn.execute('SELECT * FROM entries')], before)
+        self.assertEqual(miniapp.action(self.mgr, self.bot, 222, 'deletebills', dict(chat_id=-10011, confirm=True)), {'deleted': 1})
+        st.remove_operator(-10011, 222)
+        with self.assertRaises(PermissionError):
+            miniapp.action(self.mgr, self.bot, 222, 'deletebills', dict(chat_id=-10011, confirm=True))
+        st.add_entry(-10022, 'income', '10', 'U', '', 111, '老板')
+        self.assertEqual(miniapp.action(self.mgr, self.bot, 556, 'deletebills', dict(chat_id=-10022, confirm=True)), {'deleted': 1})
+
+    def test_delete_bills_rolls_back_when_any_table_fails(self):
+        import sqlite3
+        st = self.r.store
+        st.clear_entries(-10011)
+        st.add_entry(-10011, 'income', '10', 'U', '', 111, '老板')
+        before = {t: [tuple(r) for r in st.conn.execute('SELECT * FROM '+t)] for t in ('entries', 'customer_month_entries')}
+        with st.conn:
+            st.conn.execute("CREATE TRIGGER fail_delete BEFORE DELETE ON customer_month_entries BEGIN SELECT RAISE(ABORT, 'test rollback'); END")
+        period = st.entries(-10011)[0].accounting_date
+        for name in ('deletebills', 'deletebill'):
+            with self.subTest(action=name), self.assertRaises(sqlite3.IntegrityError):
+                miniapp.action(self.mgr, self.bot, 111, name, dict(chat_id=-10011, period=period, confirm=True))
+            for table, rows in before.items():
+                self.assertEqual([tuple(r) for r in st.conn.execute('SELECT * FROM '+table)], rows)
+
     def test_statistics_keep_cleared_rows_exclude_voids_and_use_natural_dates(self):
         st=self.r.store
         self.r.customer.sync()

@@ -452,7 +452,7 @@ r.api.calls.clear()
 r.on_callback(cq('tw:book', uid=GUEST))
 check('★ 地址簿列出地址', ADDR in r.api.all_text(), r.api.all_text()[:50])
 check('★ 只列**自己**的（别人的监听不给你看）',
-      '1/10 个' in r.api.all_text(), r.api.all_text()[:40])
+      '1/20 个' in r.api.all_text(), r.api.all_text()[:40])
 r.api.calls.clear()
 r.on_callback(cq('tw:stats:' + ADDR, uid=GUEST))
 check('★ 账单统计出得来', '收支统计' in r.api.all_text(),

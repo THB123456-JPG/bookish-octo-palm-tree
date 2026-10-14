@@ -163,7 +163,7 @@ with sync_playwright() as p:
     click('本月')
     page.wait_for_function('!queryBusy')
     expect(page.locator('.summary-cards .metric')).to_have_count(4)
-    expect(page.locator('[data-stats-group]')).to_have_count(2)
+    expect(page.locator('[data-stats-group]')).to_have_count(1)
     expect(page.get_by_text('111.11',exact=True)).to_have_count(2)
     shot('statistics')
     click('概览')

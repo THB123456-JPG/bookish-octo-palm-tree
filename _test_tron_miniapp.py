@@ -52,6 +52,25 @@ class Tests(unittest.TestCase):
         with response:
             return response.status, json.load(response)
 
+    def test_address_book_twenty_per_user(self):
+        watcher = self.runner.tronw
+        self.assertIn('每人最多 20 个', watcher.book_view(111)[0])
+        addresses = [tc.base58('41' + '%040x' % i) for i in range(21)]
+        for address in addresses[:20]:
+            watcher.add(111, address)
+        self.assertEqual(len(watcher.mine(111)), 20)
+        text, keyboard = watcher.book_view(111)
+        self.assertIn('20/20 个', text)
+        self.assertEqual(len(keyboard['inline_keyboard']), 21)
+        with self.assertRaisesRegex(ValueError, '最多监听 20 个地址'):
+            watcher.add(111, addresses[20])
+        self.assertEqual(len(watcher.mine(111)), 20)
+        watcher.add(222, addresses[0])
+        self.assertEqual(len(watcher.mine(222)), 1)
+        watcher.remove(111, addresses[0])
+        watcher.add(111, addresses[20])
+        self.assertEqual(len(watcher.mine(111)), 20)
+
     def test_platform_rotation_cooldown_and_private_hint(self):
         watcher = self.runner.tronw
         self.assertEqual(set(watcher.next_key() for _ in range(6)), set(DEFAULTS))
