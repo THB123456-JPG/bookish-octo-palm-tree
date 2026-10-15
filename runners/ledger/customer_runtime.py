@@ -44,12 +44,12 @@ class CustomerRuntime:
         self.pruned_month = None
 
     def sync(self):
+        cfg = CC.settings(self.r.bot)
+        self.r.store.customer_options = cfg['features']
         month=datetime.now(TZ).strftime('%Y-%m')
         if self.pruned_month != month:
             self.r.store.prune_month()
             self.pruned_month=month
-        cfg = CC.settings(self.r.bot)
-        self.r.store.customer_options = cfg['features']
         self.r.store.default_currency = (self.r.bot.get('ledger') or {}).get('group_currency', {})
         self.r.store.customer_group_ops = {int(uid): p['groups'] for uid, p in
             (self.r.bot.get('ledger') or {}).get('staff_grants', {}).items()}
@@ -99,21 +99,36 @@ class CustomerRuntime:
         if deposit <= 0:
             return
         entries = C._entries_for_scope(self.r.store, cid, 'today')
-        balance = C._summarize_entries(self.r.store, cid, entries).balance_usdt
-        balance += self.r.store.opening_balance(cid,self.r.store.current_accounting_date(cid))
+        balances = {unit: due-sent for unit,(due,sent) in C._settlement_totals(self.r.store, entries).items()}
+        opening = self.r.store.settlement_openings(cid,self.r.store.current_accounting_date(cid))
+        if opening is None:
+            return
+        for unit, value in opening.items():
+            balances[unit] = balances.get(unit, Decimal(0)) + value
         if cfg['features']['carry_balance']:
             prior = self.r.store.entries(cid, accounting_date=self.r.store.previous_accounting_date(cid))
-            balance += C._summarize_entries(self.r.store, cid, prior).balance_usdt
-            balance += self.r.store.opening_balance(cid,self.r.store.previous_accounting_date(cid))
+            opening = self.r.store.settlement_openings(cid,self.r.store.previous_accounting_date(cid))
+            if opening is None:
+                return
+            for unit,(due,sent) in C._settlement_totals(self.r.store, prior).items():
+                opening[unit] = opening.get(unit, Decimal(0)) + due - sent
+            for unit, value in opening.items():
+                balances[unit] = balances.get(unit, Decimal(0)) + value
+        rate = self.r.store.get_settings(cid)[0]
+        balance = balances.get('U', Decimal(0)) + balances.get('RMB', Decimal(0)) / rate
+        basis = str(deposit) + (':'+str(rate) if 'RMB' in balances else '')
         stage = 2 if balance >= deposit else (1 if balance >= deposit * Decimal('.8') else 0)
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute('CREATE TABLE IF NOT EXISTS deposit_state(chat_id INTEGER PRIMARY KEY, stage INTEGER, amount TEXT, period TEXT)')
             row = db.execute('SELECT stage,amount,period FROM deposit_state WHERE chat_id=?', (cid,)).fetchone()
             period = self.r.store.current_accounting_date(cid)
-            changed = not row or row != (stage, str(deposit), period)
-            db.execute('INSERT OR REPLACE INTO deposit_state VALUES(?,?,?,?)', (cid, stage, str(deposit), period))
+            changed = not row or row != (stage, basis, period)
+            db.execute('INSERT OR REPLACE INTO deposit_state VALUES(?,?,?,?)', (cid, stage, basis, period))
         if changed and stage:
-            self.r.send_html(cid, '⚠️ %s：未下发 %sU，群押金 %sU。' % ('押金风险预警' if stage == 2 else '押金80%提醒', balance, deposit))
+            self.r.send_html(cid, '⚠️ %s：未下发 %s，群押金 %sU%s。' % (
+                '押金风险预警' if stage == 2 else '押金80%提醒',
+                ' ＋ '.join(f'{value}{unit}' for unit,value in balances.items()), deposit,
+                f'（人民币部分按当前汇率{rate}折算比较）' if 'RMB' in balances else ''))
 
     def can_record(self, cid, uid):
         if cid < 0 and self.r.store.all_members_can_record(cid):
@@ -156,15 +171,12 @@ class CustomerRuntime:
         self.sync()
         if self.r.expired() or not self.can_record(cid, actor.user_id) or not self.r.store.is_ledger_enabled(cid):
             raise ValueError('授权已撤销、群已暂停或机器人到期')
-        kind, amount, note, rate, fee, currency = state['parsed']
-        if CC.feature(self.r.bot, 'pure_u'):
-            currency, rate, fee = 'U', Decimal(1), Decimal(0)
-        elif currency == 'CNY' and self.r.store.default_currency.get(str(cid)) == 'U':
-            currency = 'U'
+        original = state['original']
+        kind, amount, note, rate, fee, currency = C._entry_defaults(self.r.store, cid, state['parsed'], original)
         self.r.store.add_entry(cid, kind, amount, currency, note or state['original'].note,
                               actor.user_id, actor.display_name, source_message_id=state['mid'],
                               rate=rate, entry_fee_percent=fee, replace_id=state['original'].id,
-                              expected_entry=state['original'])
+                              expected_entry=original, settlement_currency=self.r.store.entry_unit(original))
         self.r.send_bill(cid)
         self.deposit(cid)
 

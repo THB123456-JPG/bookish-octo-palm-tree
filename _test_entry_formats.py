@@ -153,8 +153,10 @@ class EntryFormatsTests(unittest.TestCase):
             self.assertEqual([e.net_amount for e in es], list(map(Decimal, ('88', '1000', '1000', '-1000'))))
             state = miniapp.statistics(bot, 111, {})
             group = next(g for g in state['groups'] if g['chat_id'] == -1001)
-            self.assertEqual((Decimal(group['income']), Decimal(group['payable']), Decimal(group['paid'])),
-                             (Decimal('8300'), Decimal('1088'), Decimal(0)))
+            self.assertEqual(group['income_by_currency'], {'RMB': '1000.00', 'U': '1000.00'})
+            self.assertIsNone(group['income'])
+            self.assertEqual((Decimal(group['payable']), Decimal(group['paid'])),
+                             (Decimal('1088'), Decimal(0)))
         finally:
             if runner is not None:
                 runner.close_db()
@@ -246,7 +248,7 @@ class EntryFormatsTests(unittest.TestCase):
         section = bill.split('入款分类：', 1)[1].split('--------------------------------', 1)[0]
         self.assertEqual(section.strip().splitlines(), ['老板(3笔) 250 | 25U',
                                                       '张三(2笔) 200 | 20U',
-                                                      '项目A(2笔) 840 | 104U'])
+                                                      '项目A(2笔) 100U ＋ 40RMB | 104U'])
         self.assertNotIn('指定备注', section)
         self.assertNotIn('不计入', section)
         self.assertNotIn('999', section)

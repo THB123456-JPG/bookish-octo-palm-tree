@@ -21,6 +21,48 @@ def rate(value: Decimal | int | float | str) -> Decimal:
     return Decimal(str(value)).quantize(RATE_QUANT, rounding=ROUND_HALF_UP)
 
 
+def settlement_unit(default_currency='CNY', pure_u=False):
+    return 'RMB' if default_currency == 'U' and not pure_u else 'U'
+
+
+def entry_settlement_unit(entry, pure_u=False):
+    row = vars(entry) if isinstance(entry, LedgerEntry) else entry
+    saved = row['settlement_unit'] if 'settlement_unit' in row.keys() else ''
+    if saved in ('U', 'RMB'):
+        return saved
+    if row['kind'] == 'payout':
+        return 'RMB' if row['currency'] in ('CNY', 'RMB') else 'U'
+    return settlement_unit(row['currency'], pure_u)
+
+
+def split_settlements(entries, pure_u=False):
+    groups = {}
+    for entry in entries:
+        groups.setdefault(entry_settlement_unit(entry, pure_u), []).append(entry)
+    return dict(sorted(groups.items(), key=lambda item: item[0] != 'U'))
+
+
+def input_totals(entries):
+    totals = {}
+    for entry in entries:
+        row = vars(entry) if isinstance(entry, LedgerEntry) else entry
+        if row['kind'] == 'income':
+            unit = 'RMB' if row['currency'] in ('CNY', 'RMB') else 'U'
+            totals[unit] = totals.get(unit, Decimal(0)) + Decimal(row['amount'])
+    return totals
+
+
+def settlement_value(entry, unit='U'):
+    """Value in the settlement currency, using only the entry's saved rate."""
+    row = vars(entry) if isinstance(entry, LedgerEntry) else entry
+    if row['kind'] == 'income':
+        return Decimal(row['payable_amount'] if unit == 'RMB' else row['payable_usdt'])
+    if unit == 'RMB':
+        return (Decimal(row['amount']) if row['currency'] in ('CNY', 'RMB')
+                else money(Decimal(row['net_amount']) * Decimal(row['rate'])))
+    return Decimal(row['net_amount'])
+
+
 @dataclass(frozen=True)
 class LedgerEntry:
     id: int
@@ -41,6 +83,7 @@ class LedgerEntry:
     accounting_date: str
     created_at: str
     voided_at: str | None
+    settlement_unit: str = ''
 
 
 @dataclass(frozen=True)
@@ -59,6 +102,16 @@ class LedgerSummary:
 
 
 class LedgerStore:
+    def entry_unit(self, entry):
+        return entry_settlement_unit(entry, getattr(self, 'customer_options', {}).get('pure_u', False))
+
+    def entry_groups(self, entries):
+        return split_settlements(entries, getattr(self, 'customer_options', {}).get('pure_u', False))
+
+    def settlement_unit(self, chat_id):
+        return settlement_unit(getattr(self, 'default_currency', {}).get(str(chat_id), 'CNY'),
+                               getattr(self, 'customer_options', {}).get('pure_u', False))
+
     def __init__(self, path: Path | str, *, initialize: bool = True):
         self.path = Path(path)
         if self.path.parent:
@@ -184,6 +237,9 @@ class LedgerStore:
         self._add_column_if_missing("entries", "payable_amount", "TEXT NOT NULL DEFAULT '0.00'")
         self._add_column_if_missing("entries", "payable_usdt", "TEXT NOT NULL DEFAULT '0.00'")
         self._add_column_if_missing("entries", "accounting_date", "TEXT")
+        self._add_column_if_missing("entries", "settlement_unit", "TEXT NOT NULL DEFAULT ''")
+        if self.conn.execute("SELECT 1 FROM sqlite_master WHERE name='customer_month_entries'").fetchone():
+            self._add_column_if_missing('customer_month_entries', 'settlement_unit', "TEXT NOT NULL DEFAULT ''")
         self._add_column_if_missing("chat_settings", "fee_percent", "TEXT NOT NULL DEFAULT '0.0000'")
         self._add_column_if_missing("chat_settings", "rate_is_realtime", "INTEGER NOT NULL DEFAULT 0")
         self._add_column_if_missing("chat_settings", "ledger_enabled", "INTEGER NOT NULL DEFAULT 1")
@@ -719,10 +775,12 @@ class LedgerStore:
         replace_id: int | None = None,
         expected_entry: LedgerEntry | None = None,
         flow_label: str = '下发',
+        settlement_currency: str | None = None,
     ) -> LedgerEntry | None:
         if kind not in {"income", "payout"}:
             raise ValueError("kind must be income or payout")
         amount_value = money(amount)
+        saved_unit = settlement_currency or self.settlement_unit(chat_id)
         if kind == "income" and amount_value == 0:
             raise ValueError("amount must not be zero")
         if kind == "payout" and amount_value == 0:
@@ -734,12 +792,11 @@ class LedgerStore:
                 chat_id, operator_id if pricing_user_id is None else pricing_user_id)
         # ★ 2026-10-08：这一笔可以**单独指定汇率**（`+9000/9 努力` = 9000÷9=1000U）。
         #   不传就用群汇率，跟以前一模一样。
-        #   ★ 只对入款生效 —— 下发的数字本来就是 U，不除汇率；
-        #     给下发传了也会被忽略（别以为能改下发金额）。
+        # 下发不接受单笔汇率命令；回复修改旧流水时保留该笔汇率。
         #   ★ 存进去的是**这一笔实际用的汇率**（entries.rate 是快照），
         #     所以账单上会显示 `9000/9=1000U`，而且以后改群汇率不会改动它。
-        if kind == "income" and rate is not None:
-            entry_rate = money(rate)
+        if (kind == "income" or replace_id is not None) and rate is not None:
+            entry_rate = Decimal(str(rate)).quantize(RATE_QUANT, rounding=ROUND_HALF_UP)
             if entry_rate <= 0:
                 raise ValueError("汇率必须大于 0")
             current_rate = entry_rate
@@ -764,8 +821,8 @@ class LedgerStore:
         else:
             fee_amount = money("0")
             payable_amount = money(amount_value)
-            payable_usdt = money(amount_value)
-            net = amount_value
+            payable_usdt = money(amount_value / current_rate) if currency.upper() in ('CNY', 'RMB') else amount_value
+            net = payable_usdt
         now = self._now()
         accounting_date = self._accounting_periods(chat_id, datetime.fromisoformat(now))[0]
         with self.conn:
@@ -784,10 +841,10 @@ class LedgerStore:
             if replace_id is not None:
                 self.conn.execute(
                     'UPDATE entries SET kind=?,amount=?,currency=?,rate=?,fee_percent=?,fee_amount=?, '
-                    'payable_amount=?,payable_usdt=?,net_amount=?,note=?,operator_id=?,operator_name=? '
+                    'payable_amount=?,payable_usdt=?,net_amount=?,note=?,operator_id=?,operator_name=?,settlement_unit=? '
                     'WHERE id=? AND chat_id=? AND voided_at IS NULL',
                     (kind,str(amount_value),currency.upper(),str(current_rate),str(fee_percent),str(fee_amount),
-                     str(payable_amount),str(payable_usdt),str(money(net)),note,operator_id,operator_name,replace_id,chat_id))
+                     str(payable_amount),str(payable_usdt),str(money(net)),note,operator_id,operator_name,saved_unit,replace_id,chat_id))
                 return self.get_entry(replace_id)
             cursor = self.conn.execute(
                 """
@@ -817,7 +874,7 @@ class LedgerStore:
                     source_message_id,
                 ),
             )
-            self.conn.execute('UPDATE entries SET flow_label=? WHERE id=?', (flow_label, cursor.lastrowid))
+            self.conn.execute('UPDATE entries SET flow_label=?,settlement_unit=? WHERE id=?', (flow_label, saved_unit, cursor.lastrowid))
         return self.get_entry(int(cursor.lastrowid))
 
     def get_entry(self, entry_id: int) -> LedgerEntry:
@@ -964,6 +1021,10 @@ class LedgerStore:
             self.conn.execute("DELETE FROM entries WHERE chat_id = ?", (chat_id,))
             if self.conn.execute("SELECT 1 FROM sqlite_master WHERE name='customer_opening_balances'").fetchone():
                 self.conn.execute('DELETE FROM customer_opening_balances WHERE chat_id=?',(chat_id,))
+            if self.conn.execute("SELECT 1 FROM sqlite_master WHERE name='customer_opening_rmb'").fetchone():
+                self.conn.execute('DELETE FROM customer_opening_rmb WHERE chat_id=?',(chat_id,))
+            if self.conn.execute("SELECT 1 FROM sqlite_master WHERE name='customer_opening_units'").fetchone():
+                self.conn.execute('DELETE FROM customer_opening_units WHERE chat_id=?',(chat_id,))
         return int(count_row["count"])
 
     def clear_entries_before(self, chat_id: int, cutoff_at: str) -> int:
@@ -1002,27 +1063,70 @@ class LedgerStore:
             if self.conn.execute('SELECT 1 FROM entries LIMIT 1').fetchone():
                 self.mark_history()
             self.conn.execute('CREATE TABLE IF NOT EXISTS customer_opening_balances(chat_id INTEGER, period TEXT, balance TEXT, PRIMARY KEY(chat_id,period))')
+            self.conn.execute('CREATE TABLE IF NOT EXISTS customer_opening_rmb(chat_id INTEGER, period TEXT, balance TEXT, balance_usdt TEXT, PRIMARY KEY(chat_id,period))')
+            self.conn.execute('CREATE TABLE IF NOT EXISTS customer_opening_units(chat_id INTEGER, period TEXT, balance_u TEXT, balance_rmb TEXT, balance_usdt TEXT, PRIMARY KEY(chat_id,period))')
             for row in self.conn.execute('SELECT chat_id FROM chat_settings').fetchall():
                 cid=row[0]
                 keep={self.current_accounting_date(cid),self.previous_accounting_date(cid)}
                 records=self.conn.execute("SELECT * FROM entries WHERE chat_id=? AND voided_at IS NULL AND date(created_at,'+8 hours')<?",(cid,month)).fetchall()
                 for period in keep:
-                    balance=sum((Decimal(r['payable_usdt']) if r['kind']=='income' else -Decimal(r['net_amount']) for r in records if r['accounting_date']==period),Decimal(0))
+                    selected = [r for r in records if r['accounting_date'] == period]
+                    native = self.settlement_openings(cid, period)
+                    if native is not None:
+                        for unit, rows in self.entry_groups(selected).items():
+                            native[unit] = native.get(unit, Decimal(0)) + sum((settlement_value(r, unit) * (1 if r['kind']=='income' else -1) for r in rows), Decimal(0))
+                    balance = sum((settlement_value(r) * (1 if r['kind']=='income' else -1) for r in selected), Decimal(0))
+                    rmb = sum((settlement_value(r, 'RMB') * (1 if r['kind']=='income' else -1) for r in selected), Decimal(0))
                     old=self.conn.execute('SELECT balance FROM customer_opening_balances WHERE chat_id=? AND period=?',(cid,period)).fetchone()
-                    self.conn.execute('INSERT OR REPLACE INTO customer_opening_balances VALUES(?,?,?)',(cid,period,str(balance+(Decimal(old[0]) if old else 0))))
+                    old_rmb = self.opening_balance(cid, period, 'RMB')
+                    # Legacy U-only carry has no historical RMB value; never reprice it at today's rate.
+                    rmb = None if old_rmb is None else rmb + old_rmb
+                    balance += Decimal(old[0]) if old else 0
+                    self.conn.execute('INSERT OR REPLACE INTO customer_opening_balances VALUES(?,?,?)', (cid,period,str(balance)))
+                    self.conn.execute('INSERT OR REPLACE INTO customer_opening_rmb VALUES(?,?,?,?)',
+                                      (cid,period,str(rmb) if rmb is not None else None,str(balance)))
+                    self.conn.execute('INSERT OR REPLACE INTO customer_opening_units VALUES(?,?,?,?,?)',
+                                      (cid,period,str(native.get('U', 0)) if native is not None else None,
+                                       str(native.get('RMB', 0)) if native is not None else None,str(balance)))
                 for old in self.conn.execute('SELECT period FROM customer_opening_balances WHERE chat_id=?',(cid,)).fetchall():
                     if old[0] not in keep:
                         self.conn.execute('DELETE FROM customer_opening_balances WHERE chat_id=? AND period=?',(cid,old[0]))
+                        self.conn.execute('DELETE FROM customer_opening_rmb WHERE chat_id=? AND period=?',(cid,old[0]))
+                        self.conn.execute('DELETE FROM customer_opening_units WHERE chat_id=? AND period=?',(cid,old[0]))
             self.conn.execute("DELETE FROM entries WHERE date(created_at,'+8 hours')<?",(month,))
             tables={r[0] for r in self.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             for table in ('customer_month_entries','customer_bill_archives'):
                 if table in tables:
                     self.conn.execute("DELETE FROM "+table+" WHERE date(created_at,'+8 hours')<?",(month,))
 
-    def opening_balance(self, chat_id, period):
+    def settlement_openings(self, chat_id, period):
+        exists = self.conn.execute("SELECT 1 FROM sqlite_master WHERE name='customer_opening_balances'").fetchone()
+        if not exists or not self.conn.execute('SELECT 1 FROM customer_opening_balances WHERE chat_id=? AND period=?', (chat_id,period)).fetchone():
+            return {}
+        legacy = self.opening_balance(chat_id, period)
+        exists = self.conn.execute("SELECT 1 FROM sqlite_master WHERE name='customer_opening_units'").fetchone()
+        row = self.conn.execute('SELECT * FROM customer_opening_units WHERE chat_id=? AND period=?', (chat_id,period)).fetchone() if exists else None
+        if row and Decimal(row['balance_usdt']) == legacy:
+            if row['balance_u'] is None or row['balance_rmb'] is None:
+                return None
+            return {unit: Decimal(row[key]) for unit,key in (('U','balance_u'),('RMB','balance_rmb')) if Decimal(row[key])}
+        # Old carry totals merged currencies and cannot be split without the original entries.
+        rmb = self.opening_balance(chat_id, period, 'RMB')
+        return None if legacy or rmb is None or rmb else {}
+
+    def opening_balance(self, chat_id, period, unit='U'):
         exists=self.conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='customer_opening_balances'").fetchone()
-        row=self.conn.execute('SELECT balance FROM customer_opening_balances WHERE chat_id=? AND period=?',(chat_id,period)).fetchone() if exists else None
-        return Decimal(row[0]) if row else Decimal(0)
+        row=self.conn.execute('SELECT * FROM customer_opening_balances WHERE chat_id=? AND period=?',(chat_id,period)).fetchone() if exists else None
+        if row is None:
+            return Decimal(0)
+        if unit == 'RMB':
+            exists = self.conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='customer_opening_rmb'").fetchone()
+            rmb = self.conn.execute('SELECT balance,balance_usdt FROM customer_opening_rmb WHERE chat_id=? AND period=?', (chat_id,period)).fetchone() if exists else None
+            if rmb:
+                # A rollback may update the original U carry while leaving this companion table untouched.
+                return Decimal(rmb[0]) if rmb[0] is not None and Decimal(rmb[1]) == Decimal(row['balance']) else None
+            return None if Decimal(row['balance']) or period < datetime.now(LEDGER_TZ).strftime('%Y-%m-01') else Decimal(0)
+        return Decimal(row['balance'])
 
     def mark_history(self):
         self.conn.execute('CREATE TABLE IF NOT EXISTS customer_ledger_history(id INTEGER PRIMARY KEY CHECK(id=1))')
@@ -1091,4 +1195,5 @@ class LedgerStore:
             accounting_date=row["accounting_date"] or "",
             created_at=row["created_at"],
             voided_at=row["voided_at"],
+            settlement_unit=row['settlement_unit'] if 'settlement_unit' in row.keys() else '',
         )

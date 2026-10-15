@@ -13,21 +13,23 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 
 from core import log
-from .commands import _summarize_entries
+from .commands import _summarize_entries, _settlement_totals
 from .storage import LEDGER_TZ, LedgerStore
 
 REMIND_HOUR = 9          # 每天几点检查（北京时间）
 
 
-def format_cutoff_reminder(cutoff_at: datetime, balance: Decimal) -> str:
+def format_cutoff_reminder(cutoff_at: datetime, balance: Decimal | dict) -> str:
     cutoff_at = cutoff_at.astimezone(LEDGER_TZ)
+    amount = (' ＋ '.join(f'{abs(value):.2f}{unit}' for unit,value in balance.items())
+              if isinstance(balance, dict) else f'{abs(balance):.2f}')
     return (
         '📝系统 %s 日切账单\n'
         '▫️时间截: %s\n'
-        '▫️余款:  %.2f'
+        '▫️余款:  %s'
         % (cutoff_at.strftime('%H:%M'),
            cutoff_at.strftime('%Y-%m-%d %H:%M:%S'),
-           abs(balance))
+           amount)
     )
 
 
@@ -73,6 +75,7 @@ def send_due_reminders(api, store: LedgerStore, now: datetime) -> int:
 
         entries = store.entries(chat_id, accounting_date=period)
         balance = _summarize_entries(store, chat_id, entries).balance_usdt
+        negative = {unit: due-paid for unit,(due,paid) in _settlement_totals(store, entries).items() if due-paid < 0}
 
         # ★ 先占坑再发：这样就算发送超时，也不会重复推
         with store.conn:
@@ -81,13 +84,13 @@ def send_due_reminders(api, store: LedgerStore, now: datetime) -> int:
                 '(chat_id, accounting_date, cutoff_at, balance_usdt, status) '
                 'VALUES (?, ?, ?, ?, ?)',
                 (chat_id, period, cutoff_at.isoformat(), str(balance),
-                 'sending' if balance < 0 else 'skipped')).rowcount
-        if not claimed or balance >= 0:
+                 'sending' if negative else 'skipped')).rowcount
+        if not claimed or not negative:
             continue
 
         try:
             r = api.call('sendMessage', chat_id=chat_id,
-                         text=format_cutoff_reminder(cutoff_at, balance))
+                         text=format_cutoff_reminder(cutoff_at, negative))
         except Exception as e:
             with store.conn:
                 store.conn.execute(

@@ -20,7 +20,7 @@ PUBLIC_FILES = {'_deploy_server.py', 'tools/source_release.py', 'tools/check_iso
     'README.md', 'CUSTOMER_MINIAPP.md', 'LOCAL_WORKFLOW.md', '优化检查报告.md',
     '使用说明.txt', '记账机器人_客户使用说明.txt', '功能清单.txt', '独立实例运行.md', 'node_install.sh', '运行服务器接入.md'}
 TESTS = ['_test_source_release', '_test_nodes', '_test_server_monitor', '_test_archive_replies', '_test_audit_runtime', '_test_bot_instances',
-    '_test_client_onboarding', '_test_customer_config', '_test_miniapp', '_test_customer_ui',
+    '_test_client_onboarding', '_test_customer_config', '_test_currency_settlement', '_test_miniapp', '_test_customer_ui',
     '_test_personnel', '_test_disable_cutoff', '_test_entry_formats', '_test_personal_pricing',
     '_test_owner_statistics', '_test_group_ready', '_test_hosted_mode', '_test_solo_config',
     '_test_miniapp_scope', '_test_tron_miniapp', '_test_bank_lookup']

@@ -1,5 +1,8 @@
 """Customer-facing ledger settings and explicit, combinable staff grants."""
 from copy import deepcopy
+from urllib.parse import urlsplit
+from uuid import uuid4
+import re
 
 DEFAULT_WELCOME = '{name} 已加入该群。'
 DEFAULT_LEAVE = '{name} 已离开该群。'
@@ -77,7 +80,57 @@ def settings(bot):
     return deepcopy(dict(revision=saved.get('revision', 0), basics=basics,
                          features=features, ads=saved.get('ads', []),
                          replies=saved.get('replies', []), deposits=saved.get('deposits', {}),
-                         addresses=list(dict.fromkeys(addresses))))
+                         addresses=list(dict.fromkeys(addresses)),
+                         broadcast_templates=saved.get('broadcast_templates', []),
+                         broadcast_template_id=saved.get('broadcast_template_id', '')))
+
+
+def broadcast_buttons(value):
+    if not isinstance(value, list) or not 1 <= len(value) <= 6:
+        raise ValueError('请配置1至6行按钮')
+    if any(not isinstance(row, list) or not 1 <= len(row) <= 3 for row in value):
+        raise ValueError('每行请选择1、2或3个按钮')
+    clean = []
+    for item in [button for row in value for button in row]:
+        if not isinstance(item, dict) or set(item) != {'text', 'url'}:
+            raise ValueError('请填写按钮文字和链接')
+        label, url = item['text'], item['url']
+        if not isinstance(label, str) or not 1 <= len(label.strip()) <= 64 or any(c in label for c in '\r\n'):
+            raise ValueError('按钮文字须为1至64个字符，不能换行')
+        if not isinstance(url, str) or not 1 <= len(url) <= 2048 or any(c.isspace() or ord(c) < 32 for c in url) or '\\' in url:
+            raise ValueError('请输入完整的 http:// 或 https:// 链接')
+        try:
+            parsed = urlsplit(url)
+            valid = parsed.scheme in ('http', 'https') and parsed.hostname and not parsed.username and not parsed.password
+            parsed.port
+        except ValueError:
+            valid = False
+        if not valid:
+            raise ValueError('请输入完整的 http:// 或 https:// 链接，例如 https://t.me/用户名')
+        clean.append(dict(text=label.strip(), url=url))
+    rows, offset = [], 0
+    for row in value:
+        rows.append(clean[offset:offset+len(row)])
+        offset += len(row)
+    return rows
+
+
+def broadcast_templates(value):
+    if not isinstance(value, list) or len(value) > 20:
+        raise ValueError('最多保存20套广播按钮模板')
+    clean, seen = [], set()
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError('按钮模板格式无效')
+        tid = item.get('id') or uuid4().hex[:12]
+        name = item.get('name')
+        if not isinstance(tid, str) or not re.fullmatch('[a-zA-Z0-9_-]{1,32}', tid) or tid in seen:
+            raise ValueError('按钮模板编号无效或重复')
+        if not isinstance(name, str) or not 1 <= len(name.strip()) <= 40 or any(c in name for c in '\r\n'):
+            raise ValueError('模板名称须为1至40个字符，不能换行')
+        seen.add(tid)
+        clean.append(dict(id=tid, name=name.strip(), buttons=broadcast_buttons(item.get('buttons'))))
+    return clean
 
 
 def addresses_for_panel(bot):

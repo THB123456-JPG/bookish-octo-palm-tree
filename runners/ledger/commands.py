@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timezone, timedelta
 from decimal import Decimal, InvalidOperation
 
-from .storage import LedgerEntry, LedgerStore, LedgerSummary, money
+from .storage import LedgerEntry, LedgerStore, LedgerSummary, money, settlement_value, entry_settlement_unit, input_totals
 
 
 @dataclass(frozen=True)
@@ -317,11 +317,7 @@ def handle_text(
         # 单笔汇率写得不对（0 或负数）—— 直接告诉他，别默默记账
         return CommandResult(str(exc))
     if parsed is not None:
-        kind, amount, note, entry_rate, entry_fee, currency = parsed
-        if kind == 'income' and (pure_u or (currency == 'CNY' and getattr(store, 'default_currency', {}).get(str(chat_id)) == 'U')):
-            currency = 'U'
-            if pure_u:
-                entry_rate, entry_fee = Decimal('1'), Decimal('0')
+        kind, amount, note, entry_rate, entry_fee, currency = _entry_defaults(store, chat_id, parsed)
         if amount == 0:
             scope = "full" if normalized == "+0" else "today"
             return CommandResult(format_bill(store, chat_id, scope=scope, show_all_records=True))
@@ -357,14 +353,26 @@ def is_mine_command(text: str) -> bool:
     return text.strip() in {"/我", "/我的", "/me"}
 
 
-def _mine_totals(entries: list[LedgerEntry]) -> tuple[Decimal, Decimal]:
-    """(加分合计, 下发合计)。★ 跟 format_entry 显示的是同一个数 ——
-    入款看 net_amount、下发取绝对值，不然两处对不上会让人以为算错了"""
-    income = sum((e.net_amount for e in entries if e.kind == "income"),
+def _mine_totals(entries: list[LedgerEntry], unit='U') -> tuple[Decimal, Decimal]:
+    """(加分合计, 下发合计)，按本群结算币种汇总，保留冲回金额的符号。"""
+    income = sum((settlement_value(e, unit) for e in entries if e.kind == "income"),
                  Decimal("0"))
-    payout = sum((e.net_amount for e in entries if e.kind == "payout"),
+    payout = sum((settlement_value(e, unit) for e in entries if e.kind == "payout"),
                  Decimal("0"))
     return income, payout
+
+
+def _money_parts(values):
+    return ' ＋ '.join(f'{_format_usdt(value)}{unit}' for unit, value in values.items())
+
+
+def _settlement_totals(store, entries):
+    return {unit: _mine_totals(records, unit) for unit, records in store.entry_groups(entries).items()}
+
+
+def _totals_lines(store, entries, label):
+    return [f'{label} {len(records)} 笔 ｜ 加分 +{_format_compact_money(due)} {unit} ｜ 下发 -{_format_compact_money(paid)} {unit}'
+            for unit, records in store.entry_groups(entries).items() for due, paid in [_mine_totals(records, unit)]]
 
 
 def _mine_entry_line(store: LedgerStore, chat_id: int,
@@ -381,7 +389,7 @@ def _mine_entry_line(store: LedgerStore, chat_id: int,
     number = store.active_entry_number(chat_id, entry.id)
     label = "减分" if entry.kind == "income" and entry.amount < 0 else (
         "加分" if entry.kind == "income" else "下发")
-    calc = _entry_calculation(entry)
+    calc = _entry_calculation(entry, store.entry_unit(entry))
     # ★★ 账本有个自动规则：**没写备注时，会把发消息的人的名字填进 note**
     #    （见 _entry_attribution）。所以在「/我」里看到的 note 经常就等于
     #    操作人名 —— 那是系统填的、不是用户写的，**必须藏掉**。
@@ -404,11 +412,8 @@ def _mine_lines(store: LedgerStore, chat_id: int, entries: list[LedgerEntry],
         lines.append("")
     for entry in entries[-limit:]:
         lines.append(_mine_entry_line(store, chat_id, entry))
-    income, payout = _mine_totals(entries)
     lines.append("")
-    lines.append("共 %d 笔 ｜ 加分 +%s U ｜ 下发 -%s U"
-                 % (len(entries), _format_compact_money(income),
-                    _format_compact_money(payout)))
+    lines.extend(_totals_lines(store, entries, '共'))
     return lines
 
 
@@ -439,7 +444,7 @@ def format_mine_multi(store: LedgerStore, user_id: int,
     head = "📒 <b>加账明细</b>"
     if title:
         head += "\n" + escape(title)
-    blocks, total_in, total_out, total_n = [], Decimal("0"), Decimal("0"), 0
+    blocks, totals = [], {}
     for cid, cname in chats:
         try:
             entries = store.entries(cid, operator_id=user_id)
@@ -447,25 +452,28 @@ def format_mine_multi(store: LedgerStore, user_id: int,
             continue
         if not entries:
             continue
-        total_n += len(entries)
-        inc, out = _mine_totals(entries)
-        total_in += inc
-        total_out += out
+        for unit, records in store.entry_groups(entries).items():
+            inc, out = _mine_totals(records, unit)
+            total = totals.setdefault(unit, [0, Decimal(0), Decimal(0)])
+            total[0] += len(records)
+            total[1] += inc
+            total[2] += out
         blocks.append("\n".join(
             ["<b>【%s】</b>" % escape(cname or str(cid))]
             + _mine_lines(store, cid, entries, limit)))
     if not blocks:
         return head + "\n\n这些群里都没有你的记账记录。"
-    tail = ["", "━━━━━━━━━━", "合计 %d 笔 ｜ 加分 +%s U ｜ 下发 -%s U"
-            % (total_n, _format_compact_money(total_in),
-               _format_compact_money(total_out))]
+    tail = ["", "━━━━━━━━━━", *[
+        "合计 %d 笔 ｜ 加分 +%s %s ｜ 下发 -%s %s" %
+        (count, _format_compact_money(inc), unit, _format_compact_money(out), unit)
+        for unit, (count, inc, out) in sorted(totals.items())]]
     return "\n".join([head, ""] + blocks + tail)
 
 
 def format_owner_statistics(store: LedgerStore, chats: list[tuple[int, str]]) -> str:
     """Summarize retained non-voided records by group and actual recorder ID."""
     lines = ["📊 <b>人员记账统计</b>", "统计全部未撤销流水（含历史账期），不列逐笔明细。", ""]
-    total_n, total_in, total_out = 0, Decimal("0"), Decimal("0")
+    totals = {}
     for cid, title in chats:
         entries = store.entries(cid)
         lines.append("<b>【%s】</b>" % escape(title or str(cid)))
@@ -482,24 +490,31 @@ def format_owner_statistics(store: LedgerStore, chats: list[tuple[int, str]]) ->
             username = (user["username"] if user else "").lstrip("@")
             label = name + (" @" + username if username else "")
             lines.append("<b>%s（ID %s）</b>" % (escape(label), uid))
-            income, payout = _mine_totals(records)
-            lines.append("共 %d 笔 ｜ 加分 +%s U ｜ 下发 -%s U" %
-                         (len(records), _format_compact_money(income), _format_compact_money(payout)))
+            lines.extend(_totals_lines(store, records, '共'))
             lines.append("")
-        income, payout = _mine_totals(entries)
-        total_n += len(entries)
-        total_in += income
-        total_out += payout
-        lines.extend(["本群合计 %d 笔 ｜ 加分 +%s U ｜ 下发 -%s U" %
-                      (len(entries), _format_compact_money(income), _format_compact_money(payout)), ""])
-    lines.extend(["━━━━━━━━━━", "全部所选群合计 %d 笔 ｜ 加分 +%s U ｜ 下发 -%s U" %
-                  (total_n, _format_compact_money(total_in), _format_compact_money(total_out))])
+        for unit, records in store.entry_groups(entries).items():
+            income, payout = _mine_totals(records, unit)
+            total = totals.setdefault(unit, [0, Decimal(0), Decimal(0)])
+            total[0] += len(records)
+            total[1] += income
+            total[2] += payout
+        lines.extend([*_totals_lines(store, entries, '本群合计'), ''])
+    lines.extend(["━━━━━━━━━━", *[
+        "全部所选群合计 %d 笔 ｜ 加分 +%s %s ｜ 下发 -%s %s" %
+        (count, _format_compact_money(inc), unit, _format_compact_money(out), unit)
+        for unit, (count, inc, out) in sorted(totals.items())]])
     return "\n".join(lines)
 
 
 def format_bill(store: LedgerStore, chat_id: int, scope: str = "today", show_all_records: bool = False) -> str:
     entries = _entries_for_scope(store, chat_id, scope)
     summary = _summarize_entries(store, chat_id, entries)
+    options = getattr(store, 'customer_options', {})
+    totals = _settlement_totals(store, entries) or {store.settlement_unit(chat_id): (Decimal(0), Decimal(0))}
+    due = {unit: values[0] for unit, values in totals.items()}
+    paid = {unit: values[1] for unit, values in totals.items()}
+    balances = {unit: due[unit] - paid[unit] for unit in totals}
+    inputs = input_totals(entries)
     view_mode = store.get_ledger_view_mode(chat_id)
     rate_label = _format_money(summary.rate) if store.is_realtime_rate(chat_id) else _format_rate(summary.rate)
     default_label = "默认" if store.conn.execute(
@@ -517,29 +532,29 @@ def format_bill(store: LedgerStore, chat_id: int, scope: str = "today", show_all
         categories = {}
         for _, entry in all_income_entries:
             label = entry.note or entry.operator_name or str(entry.operator_id)
-            totals = categories.setdefault(label, [0, Decimal('0'), Decimal('0')])
-            totals[0] += 1
-            totals[1] += entry.payable_amount if entry.currency == 'U' else entry.amount
-            totals[2] += entry.payable_usdt
-        income_categories = ['入款分类：', *[
-            f'{escape(label)}({count}笔) {_format_compact_money(amount)} | {_format_usdt(usdt)}U'
-            for label, (count, amount, usdt) in categories.items()
-        ], '--------------------------------']
+            categories.setdefault(label, []).append(entry)
+        income_categories = ['入款分类：']
+        for label, records in categories.items():
+            received = input_totals(records)
+            amount = _format_compact_money(received['RMB']) if set(received) == {'RMB'} else _money_parts(received)
+            payable = {unit: values[0] for unit, values in _settlement_totals(store, records).items()}
+            income_categories.append(f'{escape(label)}({len(records)}笔) {amount} | {_money_parts(payable)}')
+        income_categories.append('--------------------------------')
     lines = [
         f"已入款({len(all_income_entries)}笔)",
-        *_format_group_lines(income_entries, hide_operator=view_mode == "compact"),
+        *_format_group_lines(income_entries, hide_operator=view_mode == "compact", pure_u=options.get('pure_u', False)),
         "--------------------------------",
         f"已下发({len(all_payout_entries)}笔)",
-        *_format_group_lines(payout_entries, hide_operator=view_mode == "compact"),
+        *_format_group_lines(payout_entries, hide_operator=view_mode == "compact", pure_u=options.get('pure_u', False)),
         "--------------------------------",
         *income_categories,
         title,
-        f"总入款金额：{_format_compact_money(summary.income)}",
+        f"总入款金额：{_money_parts(inputs) if inputs else '0'}",
         f"{default_label}汇率：{rate_label} | {default_label}费率：{_format_percent(summary.fee_percent)}",
         "",
-        f"应下发：{_format_compact_money(summary.payable_amount)} | {_format_usdt(summary.income_usdt)}U",
-        f"已下发：{_format_usdt(summary.payout_usdt)}U",
-        f"未下发：【{_blue(f'{_format_usdt(summary.balance_usdt)}U')}】",
+        f"应下发：{_format_compact_money(summary.payable_amount)} | {_money_parts(due)}" if set(totals) == {'U'} and not options.get('pure_u') else f"应下发：{_money_parts(due)}",
+        f"已下发：{_money_parts(paid)}",
+        f"未下发：【{_blue(_money_parts(balances))}】",
     ]
     if recent_entries and view_mode == "detailed":
         lines.append("")
@@ -547,32 +562,44 @@ def format_bill(store: LedgerStore, chat_id: int, scope: str = "today", show_all
         start_number = len(entries) - len(recent_entries) + 1
         for number, entry in enumerate(recent_entries, start=start_number):
             lines.append(format_entry(store, chat_id, entry, number=number, for_bill=True))
-    options = getattr(store, 'customer_options', {})
     if scope != 'archive':
         period=store.previous_accounting_date(chat_id) if scope=='yesterday' else store.current_accounting_date(chat_id)
-        month_opening=store.opening_balance(chat_id,period)
-        if month_opening:
-            lines.extend([f'月初结转余额：{_format_usdt(month_opening)}U',
-                          f'含结转未下发：{_format_usdt(month_opening+summary.balance_usdt)}U'])
+        month_opening=store.settlement_openings(chat_id,period)
+        if month_opening is None:
+            lines.append('历史月初结转尚未分币种，金额待核对，未合并。')
+        elif month_opening:
+            combined = dict(balances)
+            for unit, value in month_opening.items():
+                combined[unit] = combined.get(unit, Decimal(0)) + value
+            lines.extend([f'月初结转余额：{_money_parts(month_opening)}',
+                          f'含结转未下发：{_money_parts(combined)}'])
     if options.get('pure_u'):
         lines = [line.replace('下发', '分红') for line in lines
                  if '汇率：' not in line]
         lines = [line.replace('总入款金额：', '总入款金额（U）：') for line in lines]
     if options.get('carry_balance') and scope not in ('yesterday', 'archive'):
         previous = store.entries(chat_id, accounting_date=store.previous_accounting_date(chat_id))
-        opening = (_summarize_entries(store, chat_id, previous).balance_usdt +
-                   store.opening_balance(chat_id,store.previous_accounting_date(chat_id)))
-        lines.extend([f'上期结余（期初）：{_format_usdt(opening)}U',
-                      f'含期初未下发：{_format_usdt(opening + summary.balance_usdt)}U'])
+        opening = store.settlement_openings(chat_id,store.previous_accounting_date(chat_id))
+        if opening is None:
+            lines.append('上期历史结转尚未分币种，金额待核对，未合并。')
+        else:
+            for unit, (payable, sent) in _settlement_totals(store, previous).items():
+                opening[unit] = opening.get(unit, Decimal(0)) + payable - sent
+            opening = opening or {store.settlement_unit(chat_id): Decimal(0)}
+            combined = dict(balances)
+            for unit, value in opening.items():
+                combined[unit] = combined.get(unit, Decimal(0)) + value
+            lines.extend([f'上期结余（期初）：{_money_parts(opening)}',
+                          f'含期初未下发：{_money_parts(combined)}'])
     if options.get('categories') or (scope == 'full' and options.get('category_settlement')):
         categories = {}
         for entry in entries:
             categories.setdefault(entry.note or '未分类', []).append(entry)
         lines.append('\n备注分类结算：')
         for label, records in categories.items():
-            subtotal = _summarize_entries(store, chat_id, records)
             count = sum(e.kind == 'income' for e in records)
-            lines.append(f'{escape(label)}：入款{count}笔 | 应下发{_format_usdt(subtotal.income_usdt)}U | 已下发{_format_usdt(subtotal.payout_usdt)}U | 未下发{_format_usdt(subtotal.balance_usdt)}U')
+            amounts = _settlement_totals(store, records)
+            lines.append(f'{escape(label)}：入款{count}笔 | 应下发{_money_parts({u:v[0] for u,v in amounts.items()})} | 已下发{_money_parts({u:v[1] for u,v in amounts.items()})} | 未下发{_money_parts({u:v[0]-v[1] for u,v in amounts.items()})}')
     return "\n".join(lines)
 
 
@@ -588,10 +615,15 @@ def format_entry(
     display_number = number if number is not None else store.active_entry_number(chat_id, entry.id)
     note = f" {escape(entry.note)}" if entry.note else ""
     operator_name = escape(entry.operator_name)
-    display_amount = entry.net_amount if entry.kind == "income" else -entry.net_amount
+    unit = store.entry_unit(entry)
+    value = settlement_value(entry, unit)
+    display_amount = value if entry.kind == "income" else -value
     amount_sign = "+" if display_amount >= 0 else ""
-    amount_value = f"{amount_sign}{_format_compact_money(display_amount)} U"
+    amount_value = f"{amount_sign}{_format_compact_money(display_amount)} {unit}"
     amount_text = _blue(amount_value) if entry.kind == "payout" else amount_value
+    if entry.kind == 'income' and not for_bill:
+        source_unit = 'RMB' if entry.currency == 'CNY' else entry.currency
+        amount_text = f'{_format_compact_money(entry.amount)}{source_unit} → {amount_text}'
     if for_bill:
         attribution = entry.note or entry.operator_name[:RECENT_OPERATOR_NAME_LIMIT]
         entry_prefix = f"#{display_number} {label}"
@@ -612,12 +644,13 @@ def _format_group_lines(
     entries: list[tuple[int, LedgerEntry]],
     *,
     hide_operator: bool = False,
+    pure_u: bool = False,
 ) -> list[str]:
     if not entries:
         return []
     lines = []
     for _, entry in entries:
-        calculation = _entry_calculation(entry)
+        calculation = _entry_calculation(entry, entry_settlement_unit(entry, pure_u))
         attribution = entry.note or entry.operator_name
         if hide_operator and attribution == entry.operator_name:
             attribution = ""
@@ -626,11 +659,15 @@ def _format_group_lines(
     return lines
 
 
-def _entry_calculation(entry: LedgerEntry) -> str:
+def _entry_calculation(entry: LedgerEntry, unit='U') -> str:
     amount = _format_compact_money(entry.amount)
     if entry.kind == 'payout':
-        value = _format_compact_money(-entry.amount)
-        return _blue(f'{"+" if entry.amount < 0 else ""}{value}U')
+        value = _format_compact_money(-settlement_value(entry, unit))
+        return _blue(f'{"+" if entry.amount < 0 else ""}{value}{unit}')
+    if unit == 'RMB':
+        if entry.currency == 'U':
+            return f'{amount}U × {_format_compact_money(entry.rate)} = {_format_compact_money(entry.payable_amount)}RMB'
+        return f'{amount}RMB = {_format_compact_money(entry.payable_amount)}RMB'
     if entry.currency == 'U':
         return f'{_format_compact_money(entry.payable_amount)}/{_format_compact_money(entry.rate)}={_format_compact_money(entry.net_amount)}U'
     calculation = f'{amount}/{_format_compact_money(entry.rate)}={_format_compact_money(entry.net_amount)}U'
@@ -795,6 +832,23 @@ def format_operators(store: LedgerStore, chat_id: int, owner_ids: set[int]) -> s
     return "\n".join(lines)
 
 
+def _entry_defaults(store, chat_id, parsed, original=None):
+    kind, amount, note, rate, fee, currency = parsed
+    if getattr(store, 'customer_options', {}).get('pure_u'):
+        currency, rate, fee = 'U', Decimal('1'), Decimal('0')
+    elif original is not None:
+        if currency == 'CNY':
+            unit = store.entry_unit(original)
+            currency = original.currency if kind == original.kind else ('U' if (kind == 'income') == (unit == 'RMB') else 'CNY')
+        rate = original.rate if rate is None else rate
+        fee = original.fee_percent if fee is None else fee
+    elif kind == 'income' and currency == 'CNY' and store.settlement_unit(chat_id) == 'RMB':
+        currency = 'U'
+    elif kind == 'payout' and store.settlement_unit(chat_id) == 'U':
+        currency = 'U'
+    return kind, amount, note, rate, fee, currency
+
+
 def _parse_entry(text: str) -> tuple[str, Decimal, str, Decimal | None, Decimal | None, str] | None:
     name = ''
     if text.startswith(('+', '-')):
@@ -830,7 +884,7 @@ def _parse_entry(text: str) -> tuple[str, Decimal, str, Decimal | None, Decimal 
         entry_rate = modifiers.get('/')
         entry_fee = modifiers.get('*')
         if kind == 'payout' and modifiers:
-            raise ValueError('下发直接按 U 记账，不填写单笔汇率或费率')
+            raise ValueError('下发按本群结算币种记账，不填写单笔汇率或费率')
         if entry_rate is not None and entry_rate <= 0:
             raise ValueError('汇率要大于 0，比如：+1000/7.3')
         if entry_fee is not None:
@@ -841,7 +895,7 @@ def _parse_entry(text: str) -> tuple[str, Decimal, str, Decimal | None, Decimal 
         note = (tail[:match.start()] + rest).strip(' -:，,')
         if name:
             note = (name+' '+note).strip()
-        currency = 'U' if match['unit'] or kind == 'payout' else 'CNY'
+        currency = 'U' if match['unit'] else 'CNY'
         return kind, amount, note, entry_rate, entry_fee, currency
     return None
 

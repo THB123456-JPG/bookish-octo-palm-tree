@@ -18,6 +18,7 @@ import core
 import customer_config as CC
 from customer_ui import base_url
 from urllib.error import HTTPError
+from runners.ledger.storage import settlement_unit, settlement_value, entry_settlement_unit, split_settlements, input_totals
 
 DEFAULT_FOOTER = '联系开发者@HCW2026'
 
@@ -152,15 +153,33 @@ def month_bounds():
     return today.replace(day=1).isoformat(), today.isoformat()
 
 
-def monetary(rows):
-    income, payable, paid = Decimal(0), Decimal(0), Decimal(0)
+def monetary(rows, unit='U', pure_u=False):
+    grouped = split_settlements(rows, pure_u)
+    received = {u: str(value) for u, value in input_totals(rows).items()}
+    if len(grouped) > 1:
+        return dict(count=len(rows), income_by_currency=received,
+                    by_currency=[monetary(records, u, pure_u) for u, records in grouped.items()])
+    unit = next(iter(grouped), unit)
+    payable, paid = Decimal(0), Decimal(0)
     for row in rows:
         if row['kind'] == 'income':
-            income += Decimal(row['payable_amount'] if row['currency']=='U' else row['amount'])
-            payable += Decimal(row['payable_usdt'])
+            payable += settlement_value(row, unit)
         elif row['kind'] == 'payout':
-            paid += Decimal(row['net_amount'])
-    return dict(income=str(income),payable=str(payable),paid=str(paid),balance=str(payable-paid),count=len(rows))
+            paid += settlement_value(row, unit)
+    income_unit = next(iter(received), 'U' if unit == 'RMB' or pure_u else 'RMB') if len(received) <= 1 else ''
+    return dict(income=received.get(income_unit, '0') if income_unit else None,
+                payable=str(payable),paid=str(paid),balance=str(payable-paid),count=len(rows),
+                unit=unit,income_unit=income_unit,income_by_currency=received)
+
+
+def group_settlement_unit(bot, cid):
+    return settlement_unit((bot.get('ledger') or {}).get('group_currency', {}).get(str(cid), 'CNY'), CC.feature(bot, 'pure_u'))
+
+
+def entry_records(rows, pure_u=False):
+    return [dict({k: r.get(k) for k in ENTRY_FIELDS}, settlement_unit=unit,
+                 settlement_amount=str(settlement_value(r, unit))) for r in rows
+            for unit in [entry_settlement_unit(r, pure_u)]]
 
 
 def monthly_records(conn, cid, start=None, end=None):
@@ -260,7 +279,8 @@ def bill_query(bot, uid, payload):
             for period,rows in periods.items():
                 bills.append(dict(chat_id=g['chat_id'],title=g['title'],period=period,
                                   cutoff_hour=g['ledger_reset_hour'],cutoff_enabled=bool(g['ledger_cutoff_enabled']),
-                                  summary=monetary(rows),entries=[{k:r.get(k) for k in ENTRY_FIELDS} for r in rows]))
+                                  summary=monetary(rows, group_settlement_unit(bot, g['chat_id']), CC.feature(bot, 'pure_u')),
+                                  entries=entry_records(rows, CC.feature(bot, 'pure_u'))))
         return dict(bills=sorted(bills,key=lambda b:(b['period'],b['chat_id']),reverse=True),month=month_bounds()[0])
 
 
@@ -295,11 +315,16 @@ def statistics(bot,uid,payload):
                 continue
             entries=monthly_records(conn,g['chat_id'],start,end)
             all_entries.extend(entries)
-            rows.append(dict(chat_id=g['chat_id'],title=g['title'],**monetary(entries)))
-    result = dict(start=start,end=end,month=month,summary=monetary(all_entries),
-                  groups=sorted(rows,key=lambda row:Decimal(row[sort]),reverse=True))
+            unit = group_settlement_unit(bot, g['chat_id'])
+            rows.append(dict(chat_id=g['chat_id'],title=g['title'],**monetary(entries, unit, CC.feature(bot, 'pure_u'))))
+    summary = monetary(all_entries, group_settlement_unit(bot, cid) if cid is not None else 'U', CC.feature(bot, 'pure_u'))
+    def sort_values(row):
+        parts = {part['unit']: part for part in row.get('by_currency', [row])}
+        return tuple(Decimal(parts.get(unit, {}).get(sort) or '0') for unit in ('U', 'RMB'))
+    result = dict(start=start,end=end,month=month,summary=summary,
+                  groups=sorted(rows,key=sort_values,reverse=True))
     if cid is not None:
-        result['entries'] = [{k:r.get(k) for k in ENTRY_FIELDS} for r in all_entries]
+        result['entries'] = entry_records(all_entries, CC.feature(bot, 'pure_u'))
     return result
 
 
@@ -359,6 +384,9 @@ def overview(mgr, bot, uid):
     cfg['addresses'] = CC.addresses_for_panel(bot)
     result['welcome_photo_exists'] = bool((bot.get('ledger') or {}).get('newbie_welcome_photo')) if p['manage'] else False
     result['customer'] = cfg if p['manage'] else dict(revision=cfg['revision'])
+    if p['broadcast'] and not p['manage']:
+        result['customer']['broadcast_templates'] = cfg['broadcast_templates']
+        result['customer']['broadcast_template_id'] = cfg['broadcast_template_id']
     result['feature_fields'] = CC.FEATURES
     result['preview_basics'] = CC.settings({})['basics']
     result['message_groups'] = []
@@ -413,11 +441,11 @@ def save_customer(mgr, bot, uid, payload):
     from uuid import uuid4
     p = CC.grants(bot, uid)
     section = payload.get('section')
-    if section not in ('basics', 'features', 'ads', 'replies', 'deposits', 'addresses'):
+    if section not in ('basics', 'features', 'ads', 'replies', 'deposits', 'addresses', 'broadcast_templates', 'broadcast_template_id'):
         raise ValueError('配置分类无效')
     if section in ('basics', 'features', 'addresses') and not p['manage']:
         raise PermissionError('没有管理权限')
-    if section in ('ads', 'replies') and not (p['manage'] or p['broadcast']):
+    if section in ('ads', 'replies', 'broadcast_templates', 'broadcast_template_id') and not (p['manage'] or p['broadcast']):
         raise PermissionError('没有管理或广播权限')
     value = payload.get('value')
     with mgr.lock:
@@ -457,6 +485,13 @@ def save_customer(mgr, bot, uid, payload):
                 with closing(connect(bot)) as conn:
                     if has_history(conn):
                         raise ValueError('存在历史账目，不能切换纯U／分红模式')
+        elif section == 'broadcast_templates':
+            value = CC.broadcast_templates(value)
+            if cfg['broadcast_template_id'] not in {t['id'] for t in value}:
+                cfg['broadcast_template_id'] = ''
+        elif section == 'broadcast_template_id':
+            if not isinstance(value, str) or value and value not in {t['id'] for t in cfg['broadcast_templates']}:
+                raise ValueError('按钮模板不存在，请刷新后重试')
         elif section == 'deposits':
             if not isinstance(value, dict) or len(value) != 1:
                 raise ValueError('押金配置格式无效')
@@ -699,7 +734,7 @@ def action(mgr, bot, uid, name, payload):
                 deleted = 0
                 # Keep message receipts: replaying an old update must not recreate deleted entries.
                 for table, column in (('entries', 'accounting_date'), ('customer_month_entries', 'accounting_date'),
-                                      ('customer_opening_balances', 'period'), ('customer_bill_archives', None),
+                                      ('customer_opening_balances', 'period'), ('customer_opening_rmb', 'period'), ('customer_opening_units', 'period'), ('customer_bill_archives', None),
                                       ('ledger_cutoff_reminders', 'accounting_date')):
                     # Whole-group archive snapshots cannot be split by accounting period.
                     if table in tables and (period is None or column):

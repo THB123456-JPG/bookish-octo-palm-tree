@@ -225,9 +225,12 @@ class CustomerTests(unittest.TestCase):
 
     def _broadcast_begin(self, uid=111):
         self._broadcast_message(uid, text='广播')
+        self.calls.clear()
+
+    def _broadcast_select(self, uid=111):
+        self.r.broadcast_callback('cb', uid, 1, 'broadcast:groups')
         self.r.broadcast_callback('cb', uid, 1, 'broadcast:toggle:-10011')
         self.r.broadcast_callback('cb', uid, 1, 'broadcast:next')
-        self.calls.clear()
 
     def test_broadcast_text_photo_and_caption_require_confirmation_and_send_once(self):
         photo = [dict(file_id='FAKE_SMALL', width=100), dict(file_id='FAKE_PHOTO', width=800)]
@@ -241,11 +244,19 @@ class CustomerTests(unittest.TestCase):
                 self.assertFalse(self.r._bc[111]['waiting'])
                 self.assertEqual(len(self.r.store.entries(111)), before)
                 self.assertFalse(any(kw.get('chat_id', 0) < 0 for _, kw in self.calls))
-                self.assertIn('broadcast:confirm', str(self.calls[-1]))
+                self.assertIn('broadcast:groups', str(self.calls[-1]))
+                self.assertNotIn('broadcast:confirm', str(self.calls[-1]))
                 caption = content.get('caption', content.get('text', ''))
                 previews = [kw for method, kw in self.calls if method == 'sendPhoto']
-                self.assertEqual(previews, [dict(chat_id=111, photo='FAKE_PHOTO', caption=caption)]
-                                 if 'photo' in content else [])
+                sent_preview = [(method, kw) for method,kw in self.calls if method in ('sendMessage','sendPhoto')]
+                self.assertEqual(len(sent_preview), 1)
+                if 'photo' in content:
+                    self.assertEqual(previews[0]['photo'], 'FAKE_PHOTO')
+                    self.assertEqual(previews[0]['caption'], self.r._broadcast_preview(111))
+                    self.assertEqual(previews[0]['parse_mode'], 'HTML')
+                else:
+                    self.assertEqual(previews, [])
+                self._broadcast_select()
                 with patch('runners.ledger.runner.threading.Thread') as worker:
                     self.r.broadcast_callback('cb', 111, 2, 'broadcast:confirm')
                     self.r.broadcast_callback('cb', 111, 2, 'broadcast:confirm')
@@ -259,7 +270,11 @@ class CustomerTests(unittest.TestCase):
                 expected = ('sendPhoto', dict(chat_id=-10011, photo='FAKE_PHOTO', caption=caption)) if 'photo' in content else (
                     'sendMessage', dict(chat_id=-10011, text=caption))
                 self.assertEqual(sent, [expected])
-                self.assertIn('成功：1\n失败：0', self.calls[-1][1]['text'])
+                self.assertIn('成功：1\n失败：0', self.calls[-1][1].get('caption', self.calls[-1][1].get('text', '')))
+                self.assertEqual(self.calls[-1][0], 'editMessageCaption' if 'photo' in content else 'editMessageText')
+                self.assertEqual(self.calls[-1][1]['message_id'], args[1])
+                self.assertEqual(self.calls[-1][1]['reply_markup'], {'inline_keyboard': []})
+                self.assertFalse(any(method=='sendMessage' and kw.get('chat_id')==111 for method,kw in self.calls))
 
     def test_broadcast_rejects_unsupported_album_and_long_caption_then_can_cancel(self):
         photo = [dict(file_id='FAKE_PHOTO', width=800)]
@@ -288,11 +303,15 @@ class CustomerTests(unittest.TestCase):
     def test_broadcast_inline_photo_is_preserved(self):
         photo = [dict(file_id='FAKE_PHOTO', width=800)]
         self._broadcast_message(photo=photo, caption='广播 图文通知')
+        self.r.broadcast_callback('cb', 111, 1, 'broadcast:groups')
         self.r.broadcast_callback('cb', 111, 1, 'broadcast:all')
-        self.calls.clear()
         self.r.broadcast_callback('cb', 111, 1, 'broadcast:next')
-        self.assertEqual([kw for method, kw in self.calls if method == 'sendPhoto'],
-                         [dict(chat_id=111, photo='FAKE_PHOTO', caption='图文通知')])
+        previews = [kw for method, kw in self.calls if method == 'sendPhoto']
+        self.assertEqual(len(previews), 1)
+        self.assertEqual(previews[0]['photo'], 'FAKE_PHOTO')
+        self.assertIn('图文通知', previews[0]['caption'])
+        self.assertIn('广播预览', previews[0]['caption'])
+        self.assertFalse(any(method == 'sendMessage' for method, _ in self.calls))
         self.assertFalse(any(kw.get('chat_id', 0) < 0 for _, kw in self.calls))
 
     def test_broadcast_photo_revocation_and_inactive_group_are_respected(self):
@@ -302,6 +321,7 @@ class CustomerTests(unittest.TestCase):
             self._broadcast_begin(557)
             if not before_input:
                 self._broadcast_message(557, photo=photo, caption='通知')
+                self._broadcast_select(557)
             miniapp.action(self.mgr, self.bot, 111, 'staff', dict(user_id=557, add=False))
             self.calls.clear()
             if before_input:
@@ -313,6 +333,7 @@ class CustomerTests(unittest.TestCase):
             self.assertFalse(any(method == 'sendPhoto' for method, _ in self.calls))
         self._broadcast_begin()
         self._broadcast_message(photo=photo)
+        self._broadcast_select()
         self.r.store.deactivate_bot_chat(-10011)
         with patch('runners.ledger.runner.threading.Thread') as worker:
             self.r.broadcast_callback('cb', 111, 2, 'broadcast:confirm')
@@ -345,9 +366,212 @@ class CustomerTests(unittest.TestCase):
                     self.r._run_broadcast(111, 2, [-10011, -10022], '通知', 'FAKE_PHOTO')
                 self.assertEqual([kw['chat_id'] for method, kw in self.calls if method == 'sendPhoto'], [-10022])
                 self.assertFalse(any(method == 'sendMessage' and kw.get('chat_id', 0) < 0 for method, kw in self.calls))
-                self.assertIn('成功：1\n失败：1', self.calls[-1][1]['text'])
+                self.assertIn('成功：1\n失败：1', self.calls[-1][1].get('caption', self.calls[-1][1].get('text', '')))
             self._broadcast_message(photo=photo, caption='重试')
             self.assertFalse(self.r._bc[111]['waiting'])
+
+    def test_broadcast_templates_permissions_validation_revision_and_persistence(self):
+        buttons = [[dict(text='客服', url='https://t.me/example')],
+                   [dict(text='官网', url='https://example.com'), dict(text='帮助', url='http://example.com/help')]]
+        self.grant(557, broadcast=True)
+        self.save('broadcast_templates', [dict(name='常用', buttons=buttons)], uid=557)
+        saved = CC.settings(self.bot)['broadcast_templates']
+        self.assertEqual(saved[0]['buttons'], buttons)
+        self.assertTrue(saved[0]['id'])
+        self.assertEqual(miniapp.overview(self.mgr, self.bot, 557)['customer']['broadcast_templates'], saved)
+        for uid in (222, 999):
+            self.assertNotIn('broadcast_templates', miniapp.overview(self.mgr, self.bot, uid)['customer'])
+            with self.assertRaises(PermissionError):
+                self.save('broadcast_templates', [], uid=uid)
+        with self.assertRaises(ValueError):
+            self.save('broadcast_templates', [], revision=0)
+        for value in (None, [dict(name='', buttons=buttons)], [dict(name='x', buttons=[])],
+                      [dict(name='x', buttons=[buttons[0]*4])], [dict(name='x', buttons=buttons*4)],
+                      [saved[0], saved[0]], [dict(name='x', buttons=buttons)]*21):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                self.save('broadcast_templates', value)
+        for url in ('javascript:alert(1)', 'https://', 'https://user:pass@example.com', 'https://example.com/\n', 'tg://user?id=1'):
+            with self.subTest(url=url), self.assertRaises(ValueError):
+                self.save('broadcast_templates', [dict(name='x', buttons=[[dict(text='按钮', url=url)]])])
+        self.assertEqual(CC.settings(self.bot)['broadcast_templates'], saved)
+        self.save('basics', CC.settings(self.bot)['basics'])
+        persisted = core.load_json(core.BOTS_FILE, [])
+        self.assertEqual(next(b for b in persisted if b['id']==self.bot['id'])['ledger']['customer']['broadcast_templates'], saved)
+        self.assertEqual(CC.settings(self.mgr.find('ledger2'))['broadcast_templates'], [])
+        self.grant(558, manage=True)
+        self.save('broadcast_templates', [], uid=558)
+        self.assertEqual(CC.settings(self.bot)['broadcast_templates'], [])
+
+    def test_broadcast_preview_lines_and_full_length_photo_caption(self):
+        from html import unescape
+        self._broadcast_begin()
+        self._broadcast_message(text='测试 <原样> & 内容')
+        preview = self.calls[-1][1]['text']
+        self.assertEqual(preview.splitlines(), ['<b>广播预览</b>', '─'*20,
+            '测试 &lt;原样&gt; &amp; 内容', '─'*20, '请核对内容，然后选择目标群。'])
+        self.assertNotIn('广播内容：', preview)
+        for content in ('', '图文 <内容> & 测试', '&'*1024):
+            self._broadcast_begin()
+            self._broadcast_message(photo=[dict(file_id='FAKE_PHOTO', width=800)], caption=content)
+            previews = [kw for method,kw in self.calls if method=='sendPhoto']
+            self.assertEqual(len(previews), 1)
+            self.assertFalse(any(method=='sendMessage' for method,_ in self.calls))
+            caption = unescape(previews[0]['caption'].replace('<b>', '').replace('</b>', ''))
+            self.assertLessEqual(len(caption), 1024)
+            self.assertIn(content, caption)
+            self.assertNotIn('[图片]', caption)
+            if len(content) == 1024:
+                self.assertEqual(caption, content)
+            else:
+                self.assertEqual(caption.splitlines()[2], '🖼️ 已附图片')
+                if content:
+                    self.assertEqual(caption.splitlines()[3], content)
+            self.assertEqual(previews[0]['reply_markup']['inline_keyboard'][-1][0]['callback_data'], 'broadcast:groups')
+            self._broadcast_select()
+            self.assertTrue(self.r._bc[111]['confirm_ready'])
+            self.assertLessEqual(len(unescape(self.calls[-1][1]['caption'].replace('<b>', '').replace('</b>', ''))), 1024)
+
+    def test_broadcast_photo_edits_and_completion_replace_same_message(self):
+        self._broadcast_begin()
+        self._broadcast_message(photo=[dict(file_id='FAKE_PHOTO', width=800)], caption='正文')
+        mid = self.r._bc[111]['photo_mid']
+        self._broadcast_select()
+        edits = [(method,kw) for method,kw in self.calls if method.startswith('editMessage')]
+        self.assertFalse(any(method=='editMessageText' for method,_ in edits))
+        self.assertTrue(all(kw['message_id']==mid for method,kw in edits if method=='editMessageCaption'))
+        with patch('runners.ledger.runner.threading.Thread') as worker:
+            self.r.broadcast_callback('cb', 111, mid, 'broadcast:confirm')
+            args = worker.call_args.kwargs['args']
+        self.assertEqual(self.calls[-2][1]['caption'], '正在广播，请稍候……')
+        self.assertEqual(self.calls[-2][1]['reply_markup'], {'inline_keyboard': []})
+        self.calls.clear()
+        with patch('runners.ledger.runner.time.sleep'):
+            self.r._run_broadcast(*args)
+        method, complete = self.calls[-1]
+        self.assertEqual(method, 'editMessageCaption')
+        self.assertEqual(complete['message_id'], mid)
+        self.assertIn('广播完成\n成功：1\n失败：0', complete['caption'])
+        self.assertEqual(complete['reply_markup'], {'inline_keyboard': []})
+        self.assertFalse(any(method=='sendMessage' for method,_ in self.calls))
+        self._broadcast_begin()
+        self._broadcast_message(photo=[dict(file_id='FAKE_PHOTO', width=800)])
+        self.r.broadcast_callback('cb', 111, 2, 'broadcast:cancel')
+        self.assertEqual(self.calls[-1][0], 'editMessageCaption')
+        self.assertEqual(self.calls[-1][1]['reply_markup'], {'inline_keyboard': []})
+
+    def test_broadcast_failed_photo_edit_blocks_send_until_preview_succeeds(self):
+        self._broadcast_begin()
+        self._broadcast_message(photo=[dict(file_id='FAKE_PHOTO', width=800)], caption='正文')
+        self.r.broadcast_callback('cb', 111, 2, 'broadcast:all')
+        def fail_edit(method, **kw):
+            if method=='editMessageCaption':
+                raise core.TgError('mock edit failure')
+            return self.call(method, **kw)
+        with patch.object(self.r.api, 'call', side_effect=fail_edit):
+            self.r.broadcast_callback('cb', 111, 2, 'broadcast:next')
+            self.assertFalse(self.r._bc[111]['confirm_ready'])
+            with patch('runners.ledger.runner.threading.Thread') as worker:
+                self.r.broadcast_callback('cb', 111, 2, 'broadcast:confirm')
+                worker.assert_not_called()
+        self.r.broadcast_callback('cb', 111, 2, 'broadcast:next')
+        self.assertTrue(self.r._bc[111]['confirm_ready'])
+        with patch.object(self.r.api, 'call', side_effect=fail_edit):
+            with patch('runners.ledger.runner.threading.Thread') as worker:
+                self.r.broadcast_callback('cb', 111, 2, 'broadcast:confirm')
+                worker.assert_not_called()
+        self.assertIn(111, self.r._bc)
+
+    def test_broadcast_button_layout_preview_send_and_template_snapshot(self):
+        buttons = [[dict(text='客服', url='https://t.me/example')],
+                   [dict(text=str(i), url='https://example.com/'+str(i)) for i in range(3)]]
+        self.save('broadcast_templates', [dict(name='客服与帮助', buttons=buttons)])
+        tid = CC.settings(self.bot)['broadcast_templates'][0]['id']
+        self.save('broadcast_template_id', tid)
+        for photo in ('', 'FAKE_PHOTO'):
+            self._broadcast_begin()
+            self._broadcast_message(**(dict(photo=[dict(file_id=photo, width=800)], caption='通知') if photo else dict(text='通知')))
+            self.assertEqual(self.r._bc[111]['buttons'], buttons)
+            self.assertNotIn('broadcast:templates', str(self.calls))
+            self.assertNotIn('broadcast:buttons', str(self.calls))
+            with patch('runners.ledger.runner.threading.Thread') as worker:
+                self.r.broadcast_callback('cb', 111, 2, 'broadcast:confirm')
+                worker.assert_not_called()
+            preview = next(kw for method, kw in reversed(self.calls) if method in ('sendMessage','editMessageText','sendPhoto'))
+            self.assertEqual(preview['reply_markup']['inline_keyboard'][:2], buttons)
+            self.assertIn('广播预览', preview.get('caption', preview.get('text', '')))
+            changed = CC.settings(self.bot)['broadcast_templates']
+            changed[0]['buttons'][0][0]['text'] = '已更新'
+            self.save('broadcast_templates', changed)
+            self._broadcast_select()
+            with patch('runners.ledger.runner.threading.Thread') as worker:
+                self.r.broadcast_callback('cb', 111, 2, 'broadcast:confirm')
+                self.r.broadcast_callback('cb', 111, 2, 'broadcast:confirm')
+                worker.assert_called_once()
+                args = worker.call_args.kwargs['args']
+            self.calls.clear()
+            with patch('runners.ledger.runner.time.sleep'):
+                self.r._run_broadcast(*args)
+            sent = [(method, kw) for method, kw in self.calls if kw.get('chat_id',0)<0]
+            self.assertEqual(len(sent), 1)
+            self.assertEqual(sent[0][0], 'sendPhoto' if photo else 'sendMessage')
+            self.assertEqual(sent[0][1]['reply_markup'], {'inline_keyboard': buttons})
+            self.assertNotIn('callback_data', str(sent))
+            self.save('broadcast_templates', [dict(id=tid, name='客服与帮助', buttons=buttons)])
+
+    def test_broadcast_template_default_disable_delete_and_permission(self):
+        buttons = [[dict(text='客服', url='https://t.me/example')]]
+        self.save('broadcast_templates', [dict(name='客服', buttons=buttons)])
+        tid = CC.settings(self.bot)['broadcast_templates'][0]['id']
+        self._broadcast_begin()
+        self._broadcast_message(text='广播 正文')
+        self.assertEqual(self.r._bc[111]['text'], '广播 正文')
+        self.assertEqual(self.r._bc[111]['buttons'], [])
+        self.grant(557, broadcast=True)
+        self.save('broadcast_template_id', tid, uid=557)
+        self.assertEqual(self.r._bc[111]['buttons'], [])
+        for uid in (222, 999):
+            with self.assertRaises(PermissionError):
+                self.save('broadcast_template_id', tid, uid=uid)
+        with self.assertRaises(ValueError):
+            self.save('broadcast_template_id', 'missing')
+        self.r.broadcast_callback('cb', 111, 2, 'broadcast:cancel')
+        self.assertNotIn(111, self.r._bc)
+        self._broadcast_begin(557)
+        self._broadcast_message(557, text='正文')
+        self.assertEqual(self.r._bc[557]['buttons'], buttons)
+        self.save('broadcast_template_id', '')
+        self.assertEqual(self.r._bc[557]['buttons'], buttons)
+        self.save('broadcast_template_id', tid)
+        self.save('broadcast_templates', [])
+        self.assertEqual(CC.settings(self.bot)['broadcast_template_id'], '')
+        self.assertEqual(self.r._bc[557]['buttons'], buttons)
+        self._broadcast_select(557)
+        self.grant(557, global_ops=True)
+        with patch('runners.ledger.runner.threading.Thread') as worker:
+            self.r.broadcast_callback('cb', 557, 2, 'broadcast:confirm')
+            worker.assert_not_called()
+        self.assertFalse(any(kw.get('chat_id',0)<0 for _, kw in self.calls))
+
+    def test_broadcast_migrated_groups_are_hidden_and_not_sent_twice(self):
+        old, new = -10011, -10099999
+        self._broadcast_begin()
+        self._broadcast_message(text='正文')
+        self._broadcast_select()
+        before = len(self.r.store.entries(old))
+        self.r.handle({'message': dict(message_id=999, chat=dict(id=new, type='supergroup', title='升级后的群'),
+            migrate_from_chat_id=old, **{'from': dict(id=111, first_name='测试')})})
+        self.r.store.remember_bot_chat(old, '旧群延迟消息', 'group')
+        with patch('runners.ledger.runner.threading.Thread') as worker:
+            self.r.broadcast_callback('cb', 111, 2, 'broadcast:confirm')
+            worker.assert_not_called()
+        self.assertIn('群列表已更新', str(self.calls[-1]))
+        self.assertNotIn(old, {g['chat_id'] for g in self.r._bc[111]['groups']})
+        self.assertIn(new, {g['chat_id'] for g in self.r._bc[111]['groups']})
+        self.assertEqual(len(self.r.store.entries(old)), before)
+        self.calls.clear()
+        with patch('runners.ledger.runner.time.sleep'):
+            self.r._run_broadcast(111, 2, [old, new, new], '正文')
+        self.assertEqual([kw['chat_id'] for method,kw in self.calls if kw.get('chat_id',0)<0], [new])
 
     def test_defaults_only_affect_new_groups_and_welcome_toggles(self):
         self.r.store.set_rate(-10011,'10')
